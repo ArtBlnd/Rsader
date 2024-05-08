@@ -1,4 +1,4 @@
-#[derive(strum::Display, strum::EnumString, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(strum::Display, strum::EnumString, Debug, Clone, Copy, PartialEq, Eq, Hash, rune::Any)]
 pub enum Currency {
     KRW,
     USDT,

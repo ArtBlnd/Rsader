@@ -3,16 +3,15 @@ use std::time::Duration;
 use std::{str::FromStr, sync::Arc};
 
 use parking_lot::RwLock;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use unwrap_let::unwrap_let;
 
 use crate::config::Config;
 use crate::currency::{CurrencyPairDelimiterStringifier, CurrencyPairStringifier};
+use crate::dec;
 use crate::exchange::Trade;
-use crate::global_context::GlobalContext;
+use crate::utils::Decimal;
 use crate::{
     broadcast,
     currency::Currency,
@@ -114,61 +113,8 @@ impl Exchange for Bithumb {
 
     type Error = BithumbError;
 
-    fn initialize(&self, global_ctx: &GlobalContext, broadcaster: broadcast::Broadcaster) {
+    fn initialize(&self, broadcaster: broadcast::Broadcaster) {
         tracing::info!("Bithumb::initialize()");
-        global_ctx.spawn(spawn_ws_broadcaster(
-            global_ctx.clone(),
-            broadcaster.clone(),
-            self.subscriptions.clone(),
-            |item| {
-                unwrap_let!(BithumbItem::OrderbookSnapshot { symbol, asks, bids } = item);
-
-                let mut symbol = symbol.split('_');
-                let c1 = Currency::from_str(symbol.next().unwrap()).unwrap();
-                let c2 = Currency::from_str(symbol.next().unwrap()).unwrap();
-
-                Orderbook {
-                    pair: (c1, c2),
-                    asks: asks
-                        .into_iter()
-                        .map(|(price, amount)| Unit { price, amount })
-                        .collect(),
-                    bids: bids
-                        .into_iter()
-                        .map(|(price, amount)| Unit { price, amount })
-                        .collect(),
-                }
-            },
-            "orderbooksnapshot",
-        ));
-        global_ctx.spawn(spawn_ws_broadcaster(
-            global_ctx.clone(),
-            broadcaster,
-            self.subscriptions.clone(),
-            |item| {
-                unwrap_let!(
-                    BithumbItem::Transaction {
-                        symbol,
-                        buy_sell_gb,
-                        cont_amt,
-                        cont_price,
-                    } = item
-                );
-
-                let mut symbol = symbol.split('_');
-                let c1 = Currency::from_str(symbol.next().unwrap()).unwrap();
-                let c2 = Currency::from_str(symbol.next().unwrap()).unwrap();
-
-                Trade {
-                    pair: (c1, c2),
-                    timestamp: 0,
-                    price: cont_price,
-                    qty: cont_amt,
-                    is_bid: buy_sell_gb == "1",
-                }
-            },
-            "transaction",
-        ));
     }
 
     fn subscribe(&self, pair: (Currency, Currency), _market: Option<Market>) {
@@ -760,6 +706,14 @@ impl Exchange for Bithumb {
 
         Ok(Decimal::ZERO)
     }
+
+    async fn set_leverage(
+        &self,
+        _pair: Option<(Currency, Currency)>,
+        _value: u64,
+    ) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -776,76 +730,6 @@ pub enum BithumbItem {
         cont_amt: Decimal,
         cont_price: Decimal,
     },
-}
-
-async fn spawn_ws_broadcaster<F, O>(
-    global_ctx: GlobalContext,
-    broadcaster: broadcast::Broadcaster,
-    subscriptions: Arc<RwLock<HashSet<(Currency, Currency)>>>,
-    remapper: F,
-    ty: &'static str,
-) where
-    F: Fn(BithumbItem) -> O,
-    O: Send + Sync + 'static,
-{
-    let ws = Arc::new(Websocket::new());
-    ws.connect("wss://pubwss.bithumb.com/pub/ws").await;
-
-    {
-        let ws = ws.clone();
-        global_ctx.spawn(async move {
-            let mut is_modified = false;
-            let mut subscribed = HashSet::new();
-            loop {
-                if let Some(subscriptions) = subscriptions.try_read() {
-                    is_modified = subscribed != *subscriptions;
-                    subscribed = subscriptions.clone();
-                }
-
-                if is_modified {
-                    tracing::info!(
-                        "Bithumb::spawn_ws_broadcaster() subscribed: {:?}",
-                        subscribed
-                    );
-
-                    let stringified = subscribed
-                        .iter()
-                        .map(|(c1, c2)| {
-                            CurrencyPairDelimiterStringifier::<'_'>::stringify(*c1, *c2).unwrap()
-                        })
-                        .collect::<Vec<_>>();
-
-                    ws.send(
-                        &json!({
-                            "type": ty,
-                            "symbols": stringified,
-                        })
-                        .to_string(),
-                    )
-                    .await;
-                }
-
-                async_helpers::sleep(Duration::from_secs(1)).await;
-            }
-        });
-    }
-
-    loop {
-        let Some(message) = ws.recv().await else {
-            ws.connect("wss://pubwss.bithumb.com/pub/ws").await;
-            async_helpers::sleep(Duration::from_secs(1)).await;
-            continue;
-        };
-        let Ok(message) = serde_json::from_str::<BithumbItem>(&message) else {
-            continue;
-        };
-
-        let message = remapper(message);
-        broadcaster.broadcast(
-            Some(broadcast::BroadcastFrom::Exchange(Bithumb::NAME)),
-            message,
-        );
-    }
 }
 
 #[cfg(test)]

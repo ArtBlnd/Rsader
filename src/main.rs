@@ -1,7 +1,4 @@
-use iced::{Application, Font};
-use rsader::Rsader;
-
-fn main() -> iced::Result {
+fn main() {
     #[cfg(target_arch = "wasm32")]
     {
         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -20,15 +17,4 @@ fn main() -> iced::Result {
             .with_max_level(tracing::Level::INFO)
             .init();
     }
-
-    Rsader::run(iced::Settings {
-        antialiasing: true,
-        fonts: vec![
-            include_bytes!("../resources/SpaceMono-Regular.ttf").into(),
-            include_bytes!("../resources/SpaceMono-Bold.ttf").into(),
-        ],
-        default_font: Font::with_name("Space Mono"),
-        ..Default::default()
-    })?;
-    Ok(())
 }

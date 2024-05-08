@@ -1,8 +1,7 @@
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 
+use crate::{dec, utils::Decimal};
 use parking_lot::RwLock;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use unwrap_let::unwrap_let;
@@ -12,7 +11,6 @@ use crate::{
     config::Config,
     currency::{Currency, CurrencyPairDelimiterStringifier, CurrencyPairStringifier},
     exchange::{Balance, Order, OrderState, Unit},
-    global_context::GlobalContext,
     utils::{
         async_helpers,
         http_client::{http_client, Client},
@@ -20,7 +18,7 @@ use crate::{
     websocket::Websocket,
 };
 
-use super::{Exchange, Market, OrderToken, Orderbook};
+use super::{CandleSticks, Exchange, Market, OrderToken, Orderbook};
 
 fn access_key() -> Result<&'static str, UpbitError> {
     Config::get()
@@ -102,13 +100,8 @@ impl Exchange for Upbit {
 
     type Error = UpbitError;
 
-    fn initialize(&self, global_ctx: &GlobalContext, broadcaster: broadcast::Broadcaster) {
+    fn initialize(&self, broadcaster: broadcast::Broadcaster) {
         tracing::info!("Upbit::initialize()");
-        global_ctx.spawn(spawn_ws_broadcaster(
-            global_ctx.clone(),
-            broadcaster,
-            self.subscriptions.clone(),
-        ));
     }
 
     fn subscribe(&self, pair: (Currency, Currency), _market: Option<Market>) {
@@ -165,6 +158,14 @@ impl Exchange for Upbit {
         }
 
         Ok(Orderbook { pair, bids, asks })
+    }
+
+    async fn candlesticks(
+        &self,
+        _pair: (Currency, Currency),
+        _market: Option<Market>,
+    ) -> Result<CandleSticks, Self::Error> {
+        todo!()
     }
 
     async fn balance(
@@ -575,6 +576,14 @@ impl Exchange for Upbit {
         let response: Response = serde_json::from_str(&response)?;
         Ok(response.executed_volume)
     }
+
+    async fn set_leverage(
+        &self,
+        _pair: Option<(Currency, Currency)>,
+        _value: u64,
+    ) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -601,117 +610,9 @@ pub struct UpbitOrderbookUnit {
     pub bid_size: Decimal,
 }
 
-async fn spawn_ws_broadcaster(
-    global_ctx: GlobalContext,
-    broadcaster: broadcast::Broadcaster,
-    subscriptions: Arc<RwLock<HashSet<(Currency, Currency)>>>,
-) {
-    let ws = Arc::new(Websocket::new());
-    ws.connect("wss://api.upbit.com/websocket/v1").await;
-
-    {
-        let ws = ws.clone();
-        global_ctx.spawn(async move {
-            let mut subscribed = HashSet::new();
-            loop {
-                let mut is_modified = false;
-                if let Some(subscriptions) = subscriptions.try_read() {
-                    is_modified = subscribed != *subscriptions;
-                    subscribed = subscriptions.clone();
-                }
-
-                if is_modified {
-                    tracing::info!("Upbit::spawn_ws_broadcaster() subscribed: {:?}", subscribed);
-
-                    let stringified = subscribed
-                        .iter()
-                        .map(|(c1, c2)| {
-                            CurrencyPairDelimiterStringifier::<'-'>::stringify(*c2, *c1).unwrap()
-                        })
-                        .collect::<Vec<_>>();
-
-                    ws.send(
-                        &json!([
-                            {"ticket":"rsader"},
-                            {"type":"trade", "codes": stringified},
-                            {"type":"orderbook", "codes": stringified},
-                        ])
-                        .to_string(),
-                    )
-                    .await;
-                }
-
-                async_helpers::sleep(Duration::from_secs(1)).await;
-            }
-        });
-    }
-
-    loop {
-        let Some(message) = ws.recv().await else {
-            ws.connect("wss://api.upbit.com/websocket/v1").await;
-            async_helpers::sleep(Duration::from_secs(1)).await;
-            continue;
-        };
-
-        let into_pair = |code: &str| -> (Currency, Currency) {
-            let mut iter = code.split('-');
-            let c1 = Currency::from_str(iter.next().unwrap()).unwrap();
-            let c2 = Currency::from_str(iter.next().unwrap()).unwrap();
-            (c2, c1)
-        };
-
-        let message: UpbitItem = serde_json::from_str(&message).unwrap();
-        match message {
-            UpbitItem::Trade {
-                code,
-                trade_price,
-                trade_volume,
-                ask_bid,
-                timestamp,
-            } => broadcaster.broadcast(
-                Some(BroadcastFrom::Exchange("upbit")),
-                crate::exchange::Trade {
-                    pair: into_pair(&code),
-                    price: trade_price,
-                    qty: trade_volume,
-                    timestamp,
-                    is_bid: ask_bid == "BID",
-                },
-            ),
-            UpbitItem::Orderbook {
-                code,
-                orderbook_units,
-                ..
-            } => {
-                let pair = into_pair(&code);
-                let bids = orderbook_units
-                    .iter()
-                    .map(|unit| Unit {
-                        price: unit.bid_price,
-                        amount: unit.bid_size,
-                    })
-                    .collect();
-                let asks = orderbook_units
-                    .iter()
-                    .map(|unit| Unit {
-                        price: unit.ask_price,
-                        amount: unit.ask_size,
-                    })
-                    .collect();
-
-                broadcaster.broadcast(
-                    Some(BroadcastFrom::Exchange("upbit")),
-                    Orderbook { pair, bids, asks },
-                );
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use rust_decimal::Decimal;
-    use rust_decimal_macros::dec;
+    use crate::dec;
 
     use crate::{
         currency::Currency,
@@ -744,7 +645,7 @@ mod tests {
         println!("{:?}", order_token);
 
         let executed_volume = exchange.cancel_order(&order_token).await.unwrap();
-        assert_eq!(executed_volume, Decimal::new(0, 0));
+        assert_eq!(executed_volume, dec!(0));
     }
 
     #[cfg(test)]

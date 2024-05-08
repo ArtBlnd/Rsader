@@ -5,22 +5,21 @@ use std::{
 };
 
 use num_traits::pow;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use unwrap_let::unwrap_let;
 
+use crate::dec;
+use crate::utils::Decimal;
 use crate::{
     broadcast,
     config::Config,
     currency::{Currency, CurrencyPairStringifier, NoDelimiterCurrencyPairStringifier},
     exchange::{Order, OrderState, Unit},
-    global_context::GlobalContext,
     utils::async_helpers,
     utils::http_client::{http_client, Client, Method},
 };
 
-use super::{Balance, Exchange, Market, OrderToken, Orderbook};
+use super::{Balance, CandleSticks, Exchange, Market, OrderToken, Orderbook};
 
 #[derive(thiserror::Error, Debug)]
 pub enum BinanceError {
@@ -415,12 +414,8 @@ impl Exchange for Binance {
 
     type Error = BinanceError;
 
-    fn initialize(&self, global_ctx: &GlobalContext, broadcaster: broadcast::Broadcaster) {
+    fn initialize(&self, broadcaster: broadcast::Broadcaster) {
         tracing::info!("Binance::initialize()");
-        global_ctx.spawn(spawn_ws_broadcaster(
-            broadcaster,
-            self.subscriptions.clone(),
-        ));
     }
 
     fn subscribe(&self, pair: (Currency, Currency), market: Option<Market>) {}
@@ -450,6 +445,14 @@ impl Exchange for Binance {
             .collect();
 
         Ok(Orderbook { pair, bids, asks })
+    }
+
+    async fn candlesticks(
+        &self,
+        _pair: (Currency, Currency),
+        _market: Option<Market>,
+    ) -> Result<CandleSticks, Self::Error> {
+        todo!()
     }
 
     async fn balance(
@@ -746,15 +749,9 @@ fn round_qty_withdraw(price: Decimal, target: Decimal) -> Decimal {
     }
 }
 
-async fn spawn_ws_broadcaster(
-    broadcaster: broadcast::Broadcaster,
-    subscriptions: Arc<RwLock<HashSet<(Currency, Currency)>>>,
-) {
-}
-
 #[cfg(test)]
 mod tests {
-    use rust_decimal_macros::dec;
+    use crate::dec;
 
     use crate::{
         currency::Currency,

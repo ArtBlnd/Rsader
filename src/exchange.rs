@@ -5,13 +5,12 @@ pub mod binance;
 pub mod bithumb;
 pub mod upbit;
 
-use rust_decimal::Decimal;
+use crate::utils::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     broadcast,
     currency::Currency,
-    global_context::GlobalContext,
     utils::maybe_trait::{MaybeSend, MaybeSync},
 };
 
@@ -25,7 +24,7 @@ pub trait Exchange: MaybeSync {
 
     type Error: StdError + MaybeSend;
 
-    fn initialize(&self, global_ctx: &GlobalContext, broadcaster: broadcast::Broadcaster);
+    fn initialize(&self, broadcaster: broadcast::Broadcaster);
     fn subscribe(&self, pair: (Currency, Currency), market: Option<Market>);
 
     async fn orderbook(
@@ -33,6 +32,12 @@ pub trait Exchange: MaybeSync {
         pair: (Currency, Currency),
         market: Option<Market>,
     ) -> Result<Orderbook, Self::Error>;
+
+    async fn candlesticks(
+        &self,
+        _pair: (Currency, Currency),
+        _market: Option<Market>,
+    ) -> Result<CandleSticks, Self::Error>;
 
     async fn balance(
         &self,
@@ -74,19 +79,6 @@ pub trait Exchange: MaybeSync {
     async fn wait_order(&self, order_token: &OrderToken) -> Result<Decimal, Self::Error>;
     async fn cancel_order(&self, order_token: &OrderToken) -> Result<Decimal, Self::Error>;
 
-    async fn candlesticks(
-        &self,
-        _pair: (Currency, Currency),
-        _market: Option<Market>,
-    ) -> Result<CandleSticks, Self::Error> {
-        let fut = async move { unimplemented!() };
-
-        #[cfg(not(target_arch = "wasm32"))]
-        return fut;
-        #[cfg(any(target_arch = "wasm32"))]
-        return fut.await;
-    }
-
     async fn withdraw(
         &self,
         currency: Currency,
@@ -102,17 +94,10 @@ pub trait Exchange: MaybeSync {
         &self,
         _pair: Option<(Currency, Currency)>,
         _value: u64,
-    ) -> Result<(), Self::Error> {
-        let fut = async move { unimplemented!() };
-
-        #[cfg(not(target_arch = "wasm32"))]
-        return fut;
-        #[cfg(any(target_arch = "wasm32"))]
-        return fut.await;
-    }
+    ) -> Result<(), Self::Error>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, rune::Any)]
 pub enum Market {
     #[default]
     Spot,
@@ -126,46 +111,21 @@ pub struct Exchanges {
     pub bithumb: Arc<Bithumb>,
 }
 
-macro_rules! select_ex {
-    ($exchange_name:expr, $ex:expr, $exname:ident, $exec:expr) => {
-        match $exchange_name {
-            "upbit" => {
-                let $exname = $ex.upbit.clone();
-                $exec;
-            }
-            "binance" => {
-                let $exname = $ex.binance.clone();
-                $exec;
-            }
-            "bithumb" => {
-                let $exname = $ex.bithumb.clone();
-                $exec;
-            }
-            _ => panic!("Unknown exchange: {}", $exchange_name),
-        }
-    };
-}
-
-#[derive(
-    strum::EnumString, strum::Display, strum::EnumIter, Debug, PartialEq, Eq, Clone, Copy, Hash,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum ExchangeKind {
-    Binance,
-    Upbit,
-    Bithumb,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, rune::Any)]
 pub struct Unit {
+    #[rune(get)]
     pub price: Decimal,
+    #[rune(get)]
     pub amount: Decimal,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, rune::Any)]
 pub struct Orderbook {
+    #[rune(get)]
     pub pair: (Currency, Currency),
+    #[rune(get)]
     pub bids: Vec<Unit>,
+    #[rune(get)]
     pub asks: Vec<Unit>,
 }
 
@@ -211,9 +171,11 @@ impl Orderbook {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, rune::Any)]
 pub struct Balance {
+    #[rune(get)]
     pub available: Decimal,
+    #[rune(get)]
     pub locked: Decimal,
 }
 
