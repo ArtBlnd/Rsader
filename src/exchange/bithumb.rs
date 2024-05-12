@@ -1,27 +1,23 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
-use std::{str::FromStr, sync::Arc};
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use unwrap_let::unwrap_let;
 
 use crate::config::Config;
-use crate::currency::{CurrencyPairDelimiterStringifier, CurrencyPairStringifier};
 use crate::dec;
-use crate::exchange::Trade;
+use crate::utils::broadcaster::Subscription;
 use crate::utils::Decimal;
 use crate::{
-    broadcast,
     currency::Currency,
     exchange::{Balance, Order, OrderState, Unit},
     utils::async_helpers,
-    utils::http_client::{self, Client},
-    websocket::Websocket,
+    utils::http::{self, Client},
 };
 
-use super::{CandleSticks, Exchange, Market, OrderToken, Orderbook, Ticker};
+use super::{CandleSticks, Exchange, Market, OrderToken, Orderbook, RealtimeData, Ticker};
 
 pub fn connect_key() -> Result<&'static str, BithumbError> {
     Config::get()
@@ -70,7 +66,7 @@ fn gen_api_sign(endpoint: &str, query_string: &str, nonce: u64, secret_key: &str
 #[derive(thiserror::Error, Debug)]
 pub enum BithumbError {
     #[error("http error: {0}")]
-    HttpError(#[from] http_client::Error),
+    HttpError(#[from] http::Error),
 
     #[error("serde_json error: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
@@ -103,7 +99,7 @@ impl Bithumb {
     pub fn new() -> Self {
         Self {
             subscriptions: Arc::new(RwLock::new(HashSet::new())),
-            http_client: http_client::http_client(),
+            http_client: http::client(),
         }
     }
 }
@@ -113,13 +109,12 @@ impl Exchange for Bithumb {
 
     type Error = BithumbError;
 
-    fn initialize(&self, broadcaster: broadcast::Broadcaster) {
-        tracing::info!("Bithumb::initialize()");
-    }
-
-    fn subscribe(&self, pair: (Currency, Currency), _market: Option<Market>) {
-        tracing::info!("Bithumb::subscribe({:?})", pair);
-        self.subscriptions.write().insert(pair);
+    fn subscribe(
+        &self,
+        pair: (Currency, Currency),
+        _market: Option<Market>,
+    ) -> Subscription<RealtimeData> {
+        todo!()
     }
 
     async fn orderbook(

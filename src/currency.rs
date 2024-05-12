@@ -1,34 +1,68 @@
-#[derive(strum::Display, strum::EnumString, Debug, Clone, Copy, PartialEq, Eq, Hash, rune::Any)]
+use serde::{Deserialize, Serialize};
+
+#[derive(
+    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, rune::Any, strum::Display,
+)]
 pub enum Currency {
+    #[rune(constructor)]
     KRW,
+    #[rune(constructor)]
     USDT,
+    #[rune(constructor)]
     XRP,
+    #[rune(constructor)]
     BTC,
+    #[rune(constructor)]
     ARB,
+    #[rune(constructor)]
     ETH,
+    #[rune(constructor)]
     APT,
+    #[rune(constructor)]
     SOL,
+    #[rune(constructor)]
     SUI,
+    #[rune(constructor)]
     AERGO,
+    #[rune(constructor)]
     ATOM,
+    #[rune(constructor)]
     IQ,
+    #[rune(constructor)]
     XEM,
+    #[rune(constructor)]
     QTUM,
+    #[rune(constructor)]
     TRX,
+    #[rune(constructor)]
     STRK,
+    #[rune(constructor)]
     EOS,
+    #[rune(constructor)]
     PEPE,
+    #[rune(constructor)]
     DOGE,
+    #[rune(constructor)]
     NEO,
+    #[rune(constructor)]
     WLD,
+    #[rune(constructor)]
     BIOT,
+    #[rune(constructor)]
     POLA,
+    #[rune(constructor)]
     BIGTIME,
+    #[rune(constructor)]
     ONG,
+    #[rune(constructor)]
     AGI,
+    #[rune(constructor)]
     ACE,
+    #[rune(constructor)]
     SHIB,
+    #[rune(constructor)]
     HBAR,
+    #[rune(constructor)]
     GLM,
 }
 

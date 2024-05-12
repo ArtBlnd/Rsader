@@ -9,7 +9,18 @@ use num_traits::{One, ToPrimitive, Zero};
 use serde::{Deserialize, Serialize};
 
 #[derive(
-    Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, rune::Any,
+    Serialize,
+    Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    Hash,
+    rune::Any,
 )]
 pub struct Decimal(pub rust_decimal::Decimal);
 
@@ -17,20 +28,23 @@ impl Decimal {
     pub const ZERO: Self = Decimal(rust_decimal::Decimal::ZERO);
     pub const ONE: Self = Decimal(rust_decimal::Decimal::ONE);
 
+    #[rune::function(keep, instance)]
     pub fn normalize(self) -> Self {
         Decimal(self.0.normalize())
     }
 
+    #[rune::function(keep, instance)]
     pub fn round_dp(self, dp: u32) -> Self {
         Decimal(self.0.round_dp(dp))
     }
 
-    pub fn from_str(s: &str) -> Result<Self, rust_decimal::Error> {
-        Ok(Decimal(rust_decimal::Decimal::from_str(s)?))
-    }
-
+    #[rune::function(keep, instance)]
     pub fn abs(self) -> Self {
         Decimal(self.0.abs())
+    }
+
+    pub fn from_str(s: &str) -> Result<Self, rust_decimal::Error> {
+        Ok(Decimal(rust_decimal::Decimal::from_str(s)?))
     }
 }
 

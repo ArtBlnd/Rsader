@@ -1,0 +1,12 @@
+
+pub async fn main(args) {
+    let orderbook = bithumb.orderbook((Currency::USDT, Currency::KRW), None).await?;
+    for ask in orderbook.asks {
+        println("Ask: price: {}, quantity: {}", ask.price, ask.quantity);
+    }
+    for bid in orderbook.bids {
+        println("Bid: price: {}, quantity: {}", bid.price, bid.quantity);
+    }
+
+    Ok(())
+}

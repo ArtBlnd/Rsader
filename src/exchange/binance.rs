@@ -8,18 +8,17 @@ use num_traits::pow;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use unwrap_let::unwrap_let;
 
-use crate::dec;
 use crate::utils::Decimal;
 use crate::{
-    broadcast,
     config::Config,
     currency::{Currency, CurrencyPairStringifier, NoDelimiterCurrencyPairStringifier},
     exchange::{Order, OrderState, Unit},
     utils::async_helpers,
-    utils::http_client::{http_client, Client, Method},
+    utils::http::{client, Client, Method},
 };
+use crate::{dec, utils::broadcaster::Subscription};
 
-use super::{Balance, CandleSticks, Exchange, Market, OrderToken, Orderbook};
+use super::{Balance, CandleSticks, Exchange, Market, OrderToken, Orderbook, RealtimeData};
 
 #[derive(thiserror::Error, Debug)]
 pub enum BinanceError {
@@ -82,7 +81,7 @@ impl Binance {
     pub fn new() -> Self {
         Self {
             subscriptions: Arc::new(RwLock::new(HashSet::new())),
-            http_client: http_client(),
+            http_client: client(),
         }
     }
 
@@ -414,11 +413,13 @@ impl Exchange for Binance {
 
     type Error = BinanceError;
 
-    fn initialize(&self, broadcaster: broadcast::Broadcaster) {
-        tracing::info!("Binance::initialize()");
+    fn subscribe(
+        &self,
+        pair: (Currency, Currency),
+        market: Option<Market>,
+    ) -> Subscription<RealtimeData> {
+        todo!()
     }
-
-    fn subscribe(&self, pair: (Currency, Currency), market: Option<Market>) {}
 
     async fn orderbook(
         &self,

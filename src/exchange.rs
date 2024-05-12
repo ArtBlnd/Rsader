@@ -1,22 +1,19 @@
-use std::error::Error as StdError;
 use std::sync::Arc;
+use std::{default, error::Error as StdError};
 
 pub mod binance;
 pub mod bithumb;
 pub mod upbit;
 
-use crate::utils::Decimal;
 use serde::{Deserialize, Serialize};
 
+use self::{binance::Binance, bithumb::Bithumb, upbit::Upbit};
+use crate::utils::broadcaster::Subscription;
 use crate::{
-    broadcast,
     currency::Currency,
     utils::maybe_trait::{MaybeSend, MaybeSync},
+    utils::Decimal,
 };
-
-use self::{binance::Binance, bithumb::Bithumb, upbit::Upbit};
-
-pub type OrderToken = serde_json::Value;
 
 #[cfg_attr(not(target_arch = "wasm32"), trait_variant::make(Send))]
 pub trait Exchange: MaybeSync {
@@ -24,8 +21,11 @@ pub trait Exchange: MaybeSync {
 
     type Error: StdError + MaybeSend;
 
-    fn initialize(&self, broadcaster: broadcast::Broadcaster);
-    fn subscribe(&self, pair: (Currency, Currency), market: Option<Market>);
+    fn subscribe(
+        &self,
+        pair: (Currency, Currency),
+        market: Option<Market>,
+    ) -> Subscription<RealtimeData>;
 
     async fn orderbook(
         &self,
@@ -97,10 +97,14 @@ pub trait Exchange: MaybeSync {
     ) -> Result<(), Self::Error>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, rune::Any)]
+pub type OrderToken = serde_json::Value;
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Hash, rune::Any)]
 pub enum Market {
+    #[rune(constructor)]
     #[default]
     Spot,
+    #[rune(constructor)]
     Future,
 }
 
@@ -111,7 +115,7 @@ pub struct Exchanges {
     pub bithumb: Arc<Bithumb>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, rune::Any)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, rune::Any)]
 pub struct Unit {
     #[rune(get)]
     pub price: Decimal,
@@ -119,7 +123,7 @@ pub struct Unit {
     pub amount: Decimal,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, rune::Any)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, rune::Any)]
 pub struct Orderbook {
     #[rune(get)]
     pub pair: (Currency, Currency),
@@ -171,7 +175,7 @@ impl Orderbook {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, rune::Any)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, rune::Any)]
 pub struct Balance {
     #[rune(get)]
     pub available: Decimal,
@@ -179,7 +183,7 @@ pub struct Balance {
     pub locked: Decimal,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, rune::Any)]
 pub struct Ticker {
     pub timestamp: u64,
     pub open: Decimal,
@@ -188,13 +192,13 @@ pub struct Ticker {
     pub high: Decimal,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, rune::Any)]
 pub struct CandleSticks {
     pub pair: (Currency, Currency),
     pub tickers: Vec<Ticker>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, rune::Any)]
 pub struct Trade {
     pub pair: (Currency, Currency),
     pub timestamp: u64,
@@ -203,14 +207,20 @@ pub struct Trade {
     pub is_bid: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, rune::Any)]
 pub struct Order {
     pub state: OrderState,
     pub executed_volume: Decimal,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, rune::Any)]
 pub enum OrderState {
     Wait,
     Closed,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, rune::Any)]
+pub enum RealtimeData {
+    Orderbook(#[rune(get)] Orderbook),
+    Trade(#[rune(get)] Trade),
 }

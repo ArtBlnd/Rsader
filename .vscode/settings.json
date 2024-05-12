@@ -1,3 +1,8 @@
 {
-    "rust-analyzer.showUnlinkedFileNotification": false
+    "files.associations": {
+        "*.slint": "slint"
+    },
+    "[slint]": {
+        "editor.formatOnSave": false
+    }
 }

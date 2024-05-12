@@ -1,15 +1,21 @@
-use rune::runtime::Protocol;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 
 use crate::utils::Decimal;
+
+use rune::alloc::fmt::TryWrite;
+use rune::runtime::{Formatter, Protocol, VmResult};
+
+use super::error;
 
 pub fn install_module_utils(context: &mut rune::Context) {
     let mut module = rune::Module::new();
 
     module.ty::<Decimal>().unwrap();
-    module.function_meta(Decimal::normalize_).unwrap();
-    module.function_meta(Decimal::abs_).unwrap();
-    module.function_meta(Decimal::from_str_).unwrap();
+    module.function_meta(Decimal::normalize__meta).unwrap();
+    module.function_meta(Decimal::abs__meta).unwrap();
+    module.function_meta(Decimal::round_dp__meta).unwrap();
+    module.function_meta(Decimal::decimal_from_str).unwrap();
+    module.function_meta(Decimal::string_display).unwrap();
 
     module
         .associated_function(Protocol::ADD, Decimal::add)
@@ -40,18 +46,14 @@ pub fn install_module_utils(context: &mut rune::Context) {
 }
 
 impl Decimal {
-    #[rune::function(instance, path = Self::normalize)]
-    fn normalize_(self) -> Decimal {
-        self.normalize()
+    #[rune::function(path = Decimal::from_str)]
+    fn decimal_from_str(s: &str) -> error::Result<Decimal> {
+        Decimal::from_str(s).map_err(|e| error::Error::from_stderr(e))
     }
 
-    #[rune::function(instance, path = Self::abs)]
-    fn abs_(self) -> Decimal {
-        self.abs()
-    }
-
-    #[rune::function(instance, path = Self::from_str)]
-    fn from_str_(s: &str) -> Decimal {
-        Decimal::from_str(s).unwrap()
+    #[rune::function(instance, protocol = STRING_DISPLAY)]
+    fn string_display(&self, f: &mut Formatter) -> VmResult<()> {
+        rune::vm_write!(f, "{}", self);
+        VmResult::Ok(())
     }
 }

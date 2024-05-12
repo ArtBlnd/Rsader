@@ -1,24 +1,29 @@
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 
-use crate::{dec, utils::Decimal};
+use crate::{
+    dec,
+    utils::{
+        broadcaster::{Broadcaster, Subscription},
+        Decimal,
+    },
+};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use unwrap_let::unwrap_let;
 
 use crate::{
-    broadcast::{self, BroadcastFrom},
     config::Config,
     currency::{Currency, CurrencyPairDelimiterStringifier, CurrencyPairStringifier},
     exchange::{Balance, Order, OrderState, Unit},
     utils::{
         async_helpers,
-        http_client::{http_client, Client},
+        http::{client, Client},
     },
     websocket::Websocket,
 };
 
-use super::{CandleSticks, Exchange, Market, OrderToken, Orderbook};
+use super::{CandleSticks, Exchange, Market, OrderToken, Orderbook, RealtimeData};
 
 fn access_key() -> Result<&'static str, UpbitError> {
     Config::get()
@@ -82,15 +87,19 @@ pub enum UpbitError {
 }
 
 pub struct Upbit {
-    subscriptions: Arc<RwLock<HashSet<(Currency, Currency)>>>,
+    subscribed_pairs: Arc<RwLock<HashSet<(Currency, Currency)>>>,
+    broadcaster: Broadcaster<RealtimeData>,
+
     http_client: Client,
 }
 
 impl Upbit {
     pub fn new() -> Self {
         Self {
-            subscriptions: Arc::new(RwLock::new(HashSet::new())),
-            http_client: http_client(),
+            subscribed_pairs: Arc::new(RwLock::new(HashSet::new())),
+            broadcaster: Broadcaster::new(),
+
+            http_client: client(),
         }
     }
 }
@@ -100,13 +109,12 @@ impl Exchange for Upbit {
 
     type Error = UpbitError;
 
-    fn initialize(&self, broadcaster: broadcast::Broadcaster) {
-        tracing::info!("Upbit::initialize()");
-    }
-
-    fn subscribe(&self, pair: (Currency, Currency), _market: Option<Market>) {
-        tracing::info!("Upbit::subscribe({:?})", pair);
-        self.subscriptions.write().insert(pair);
+    fn subscribe(
+        &self,
+        pair: (Currency, Currency),
+        _market: Option<Market>,
+    ) -> Subscription<RealtimeData> {
+        self.broadcaster.subscribe()
     }
 
     async fn orderbook(

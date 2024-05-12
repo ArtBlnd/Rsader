@@ -1,0 +1,11 @@
+export global Palette {
+    in-out property <bool> dark-mode: true;
+    out property <brush> background-color: dark-mode ? #000000 : #FFFFFF;
+    out property <brush> foreground-color: #2e2e2e;
+    out property <brush> font-color: dark-mode ? #FFFFFF : #000000;
+    out property <brush> r-color: #ca3f64;
+    out property <brush> g-color: #25a750;
+    out property <brush> r-background-color: #361b22;
+    out property <brush> g-background-color: #152f1e;
+    out property <brush> shadow: dark-mode ? #00000042 : #00000024;
+}

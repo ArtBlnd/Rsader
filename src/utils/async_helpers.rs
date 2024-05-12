@@ -17,6 +17,53 @@ pub async fn sleep(duration: Duration) {
     gloo_timers::future::sleep(duration).await;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn spawn<T>(future: T) -> AsyncHandle<T::Output>
+where
+    T: Future + Send + 'static,
+    T::Output: Send + 'static,
+{
+    static RUNTIME: once_cell::sync::Lazy<tokio::runtime::Runtime> =
+        once_cell::sync::Lazy::new(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+        });
+
+    let join_handle = RUNTIME.spawn(future);
+    AsyncHandle {
+        handle: join_handle,
+    }
+}
+
+#[cfg(any(target_arch = "wasm32"))]
+pub fn spawn<T>(future: T) -> AsyncHandle<T::Output>
+where
+    T: Future + 'static,
+    T::Output: 'static,
+{
+    use async_channel::unbounded;
+    let cancellation = Arc::new(AtomicBool::new(false));
+
+    let (sender, receiver) = unbounded();
+    let cancel = cancellation.clone();
+    let future = async move {
+        let result = future.await;
+        sender.send(result).await.unwrap();
+    };
+
+    wasm_bindgen_futures::spawn_local(CancelableFuture {
+        inner: future,
+        cancel,
+    });
+
+    AsyncHandle {
+        cancellation,
+        waiter: receiver,
+    }
+}
+
 pub struct AsyncHandle<T> {
     #[cfg(not(target_arch = "wasm32"))]
     handle: tokio::task::JoinHandle<T>,

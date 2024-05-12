@@ -1,16 +1,14 @@
-use std::any::Any;
-use std::fmt::Debug;
 use std::sync::Arc;
 
 use crate::exchange::{Exchange, Market};
-use crate::global_context::GlobalContext;
-
 use crate::utils::maybe_trait::MaybeSend;
 use crate::{currency::Currency, exchange::Orderbook};
 
 use super::error::Error;
 
-pub fn install_exchange_utils(context: &mut rune::Context) {
+use rune::runtime::Ref;
+
+pub fn install_module_exchange(context: &mut rune::Context) {
     let mut module = rune::Module::new();
 
     module.ty::<Currency>().unwrap();
@@ -18,7 +16,7 @@ pub fn install_exchange_utils(context: &mut rune::Context) {
     module.ty::<Market>().unwrap();
     module.ty::<ExchangeOpaque>().unwrap();
 
-    module.function_meta(ExchangeOpaque::orderbook).unwrap();
+    module.function_meta(orderbook).unwrap();
 
     context.install(module).unwrap();
 }
@@ -63,15 +61,13 @@ where
 }
 
 #[derive(rune::Any, Clone)]
-pub struct ExchangeOpaque(Arc<dyn VmExchange + Send + Sync + 'static>);
+pub struct ExchangeOpaque(Arc<dyn VmExchange + 'static>);
 
-impl ExchangeOpaque {
-    #[rune::function(instance)]
-    pub async fn orderbook(
-        self,
-        pair: (Currency, Currency),
-        market: Option<Market>,
-    ) -> Result<Orderbook, Error> {
-        self.0.orderbook(pair, market).await
-    }
+#[rune::function(instance)]
+pub async fn orderbook(
+    ex: Ref<ExchangeOpaque>,
+    pair: (Currency, Currency),
+    market: Option<Market>,
+) -> Result<Orderbook, Error> {
+    ex.0.orderbook(pair, market).await
 }

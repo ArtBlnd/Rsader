@@ -1,5 +1,5 @@
-fn main() {
-    #[cfg(target_arch = "wasm32")]
+fn main() -> anyhow::Result<()> {
+    #[cfg(any(target_arch = "wasm32"))]
     {
         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
         tracing_subscriber::fmt()
@@ -17,4 +17,7 @@ fn main() {
             .with_max_level(tracing::Level::INFO)
             .init();
     }
+
+    rsader::initialize_and_run()?;
+    Ok(())
 }
