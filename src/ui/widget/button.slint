@@ -5,6 +5,7 @@ export component Button inherits Rectangle {
     in property <color> font-color: Palette.font-color;
     in property <length> font-size: self.height * 0.3;
     in property <bool> rounded: false;
+    in property <bool> disabled: true;
 
     in property <color> color-background: Palette.g-color;
     in property <color> color-hover: Palette.dark-mode ? color-background.darker(0.2) : color-background.brighter(0.2);
@@ -32,17 +33,26 @@ export component Button inherits Rectangle {
             if (root.checkable) {
                 root.checked = !root.checked;
             }
+
+            if (disabled) {
+                return;
+            }
+            
             root.clicked();
         }
     }
 
     states [
-        pressed when i-touch-area.pressed : {
+        pressed when i-touch-area.pressed && !root.disabled : {
             background: color-pressed;
         }
 
-        hover when i-touch-area.has-hover : {
+        hover when i-touch-area.has-hover && !root.disabled : {
             background: color-hover;
+        }
+
+        disabled when root.disabled : {
+            root.opacity: 0.5;
         }
     ]
 }
