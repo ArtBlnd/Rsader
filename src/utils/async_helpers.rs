@@ -18,19 +18,19 @@ pub async fn sleep(duration: Duration) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+static RUNTIME: once_cell::sync::Lazy<tokio::runtime::Runtime> = once_cell::sync::Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+});
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn spawn<T>(future: T) -> AsyncHandle<T::Output>
 where
     T: Future + Send + 'static,
     T::Output: Send + 'static,
 {
-    static RUNTIME: once_cell::sync::Lazy<tokio::runtime::Runtime> =
-        once_cell::sync::Lazy::new(|| {
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-        });
-
     let join_handle = RUNTIME.spawn(future);
     AsyncHandle {
         handle: join_handle,
@@ -50,7 +50,7 @@ where
     let cancel = cancellation.clone();
     let future = async move {
         let result = future.await;
-        sender.send(result).await.unwrap();
+        let _ = sender.send(result).await;
     };
 
     wasm_bindgen_futures::spawn_local(CancelableFuture {
@@ -62,6 +62,13 @@ where
         cancellation,
         waiter: receiver,
     }
+}
+
+pub fn block_on<T>(future: T) -> T::Output
+where
+    T: Future,
+{
+    futures::executor::block_on(future)
 }
 
 pub struct AsyncHandle<T> {

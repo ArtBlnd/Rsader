@@ -33,19 +33,21 @@ impl Websocket {
 mod websocket_wasm {
     use async_channel::{Receiver as AsyncRx, Sender as AsyncTx};
     use futures::{SinkExt, StreamExt};
-    use wasm_sockets::WasmWebSocket;
+    use wasm_sockets::EventClient as WasmWebSocket;
+
+    use crate::utils::async_helpers;
 
     pub(super) fn spawn_and_handle(url: &str) -> (AsyncTx<String>, AsyncRx<String>) {
         let (tx_sender, tx_recver) = async_channel::unbounded();
         let (rx_sender, rx_recver) = async_channel::unbounded();
 
         // TODO: Abort the future when the websocket is dropped.
-        tokio::spawn(handler(url.to_string(), tx_recver, rx_sender));
+        async_helpers::spawn(handler(url.to_string(), tx_recver, rx_sender));
         (tx_sender, rx_recver)
     }
 
     async fn handler(url: String, tx_recver: AsyncRx<String>, rx_sender: AsyncTx<String>) {
-        let ws = WasmWebSocket::new(&url).unwrap();
+        let mut ws = WasmWebSocket::new(&url).unwrap();
         let tx_recver = tx_recver.clone();
         let rx_sender = rx_sender.clone();
 
@@ -71,12 +73,14 @@ mod websocket_tokio {
     use futures::{SinkExt, StreamExt};
     use tokio::select;
 
+    use crate::utils::async_helpers;
+
     pub(super) fn spawn_and_handle(url: &str) -> (AsyncTx<String>, AsyncRx<String>) {
         let (tx_sender, tx_recver) = async_channel::unbounded();
         let (rx_sender, rx_recver) = async_channel::unbounded();
 
         // TODO: Abort the future when the websocket is dropped.
-        tokio::spawn(handler(url.to_string(), tx_recver, rx_sender));
+        async_helpers::spawn(handler(url.to_string(), tx_recver, rx_sender));
         (tx_sender, rx_recver)
     }
 

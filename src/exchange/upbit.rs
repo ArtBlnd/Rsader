@@ -88,8 +88,6 @@ pub enum UpbitError {
 
 pub struct Upbit {
     subscribed_pairs: Arc<RwLock<HashSet<(Currency, Currency)>>>,
-    broadcaster: Broadcaster<RealtimeData>,
-
     http_client: Client,
 }
 
@@ -97,8 +95,6 @@ impl Upbit {
     pub fn new() -> Self {
         Self {
             subscribed_pairs: Arc::new(RwLock::new(HashSet::new())),
-            broadcaster: Broadcaster::new(),
-
             http_client: client(),
         }
     }
@@ -114,7 +110,7 @@ impl Exchange for Upbit {
         pair: (Currency, Currency),
         _market: Option<Market>,
     ) -> Subscription<RealtimeData> {
-        self.broadcaster.subscribe()
+        todo!()
     }
 
     async fn orderbook(

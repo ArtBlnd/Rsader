@@ -1,0 +1,16 @@
+[application]
+
+name = "Rsader"
+default_platform = "web"
+out_dir = "dist"
+
+[web.app]
+title = ""
+
+[web.watcher]
+reload_html = true
+watch_path = ["src", "resources", "Dioxus.toml", "Cargo.toml", "Cargo.lock"]
+
+[web.resource]
+
+[web.resource.dev]

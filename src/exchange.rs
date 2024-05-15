@@ -1,5 +1,5 @@
+use std::error::Error as StdError;
 use std::sync::Arc;
-use std::{default, error::Error as StdError};
 
 pub mod binance;
 pub mod bithumb;

@@ -18,6 +18,6 @@ fn main() -> anyhow::Result<()> {
             .init();
     }
 
-    rsader::initialize_and_run()?;
+    rsader::entrypoint()?;
     Ok(())
 }
