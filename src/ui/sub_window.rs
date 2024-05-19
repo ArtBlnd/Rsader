@@ -196,6 +196,12 @@ impl SubWindowMgrState {
             self.dragging = None;
         }
 
+        if let Some((target, _, _)) = self.resizing {
+            if target == uuid {
+                self.resizing = None;
+            }
+        }
+
         self.mark_changed();
     }
 
@@ -301,7 +307,7 @@ impl SubWindowMgrState {
                 }
             };
 
-            self.root.remove(id);
+            assert!(self.root.remove(id));
             self.root.split_append(target, id, side);
             self.mark_changed();
         }
@@ -432,22 +438,22 @@ impl SplitSide {
     }
 }
 
-enum VSplitItem {
+enum SplitItem {
     Widget(uuid::Uuid),
     Split(Split),
 }
 
-impl VSplitItem {
+impl SplitItem {
     pub fn uuid(&self) -> uuid::Uuid {
         match self {
-            VSplitItem::Widget(uuid) => *uuid,
-            VSplitItem::Split(split) => split.uuid,
+            SplitItem::Widget(uuid) => *uuid,
+            SplitItem::Split(split) => split.uuid,
         }
     }
 }
 
 struct Split {
-    children: Vec<VSplitItem>,
+    children: Vec<SplitItem>,
     children_ratio: Vec<f64>,
 
     uuid: uuid::Uuid,
@@ -469,7 +475,7 @@ impl Split {
 
     fn new_with(top: uuid::Uuid, bottom: uuid::Uuid, horizontal: bool) -> Self {
         Self {
-            children: vec![VSplitItem::Widget(top), VSplitItem::Widget(bottom)],
+            children: vec![SplitItem::Widget(top), SplitItem::Widget(bottom)],
             children_ratio: vec![0.5, 0.5],
 
             uuid: uuid::Uuid::new_v4(),
@@ -480,43 +486,47 @@ impl Split {
 
     fn first(&self) -> Option<uuid::Uuid> {
         match self.children.first() {
-            Some(VSplitItem::Widget(uuid)) => Some(*uuid),
-            Some(VSplitItem::Split(split)) => split.first(),
+            Some(SplitItem::Widget(uuid)) => Some(*uuid),
+            Some(SplitItem::Split(split)) => split.first(),
             None => None,
         }
     }
 
+    /// Remove the window with the given id from the split tree
+    /// Returns true if the window is removed
     fn remove(&mut self, id: uuid::Uuid) -> bool {
         if let Some(target) = self.find(id) {
             self.remove_and_rebalance(target);
+            return true;
         } else {
             for (idx, item) in self.children.iter_mut().enumerate() {
-                if let VSplitItem::Split(split) = item {
+                if let SplitItem::Split(split) = item {
                     if split.remove(id) {
-                        self.remove_and_rebalance(idx);
-                    }
+                        if split.children.is_empty() {
+                            self.remove_and_rebalance(idx);
+                        }
 
-                    break;
+                        return true;
+                    }
                 }
             }
         }
 
-        self.children.is_empty()
+        false
     }
 
+    /// Remove the window at the given index and rebalance the ratios
     fn remove_and_rebalance(&mut self, idx: usize) {
-        self.children_ratio.remove(idx);
+        let ratio = self.children_ratio.remove(idx);
         self.children.remove(idx);
 
-        // rebalance the ratios
-        let total_ratio = self.children_ratio.iter().sum::<f64>();
-        for ratio in self.children_ratio.iter_mut() {
-            *ratio /= total_ratio;
+        if !self.children_ratio.is_empty() {
+            self.children_ratio[idx.checked_sub(1).unwrap_or_default()] += ratio;
         }
     }
 
     fn append(&mut self, id: uuid::Uuid) {
-        self.children.push(VSplitItem::Widget(id));
+        self.children.push(SplitItem::Widget(id));
 
         if self.children_ratio.is_empty() {
             self.children_ratio.push(1.0);
@@ -551,18 +561,18 @@ impl Split {
             self.children_ratio[target - 1] += amount;
         } else {
             for item in self.children.iter_mut() {
-                if let VSplitItem::Split(split) = item {
+                if let SplitItem::Split(split) = item {
                     split.resize(id, w, h).await;
                 }
             }
         }
     }
 
-    fn split_append(&mut self, target: uuid::Uuid, id: uuid::Uuid, side: SplitSide) {
+    fn split_append(&mut self, target: uuid::Uuid, id: uuid::Uuid, side: SplitSide) -> bool {
         for (idx, item) in self.children.iter_mut().enumerate() {
             let ratio = self.children_ratio[idx];
             match item {
-                VSplitItem::Widget(uuid) => {
+                SplitItem::Widget(uuid) => {
                     if *uuid != target {
                         continue;
                     }
@@ -570,31 +580,35 @@ impl Split {
                     let side = if self.horizontal { side.rotate() } else { side };
                     match side {
                         SplitSide::Top => {
-                            self.children.insert(idx, VSplitItem::Widget(id));
+                            self.children.insert(idx, SplitItem::Widget(id));
                             self.children_ratio.insert(idx, ratio / 2.0);
                             self.children_ratio[idx + 1] = ratio / 2.0;
                         }
                         SplitSide::Bottom => {
-                            self.children.insert(idx + 1, VSplitItem::Widget(id));
+                            self.children.insert(idx + 1, SplitItem::Widget(id));
                             self.children_ratio.insert(idx + 1, ratio / 2.0);
                             self.children_ratio[idx] = ratio / 2.0;
                         }
                         SplitSide::Left => {
                             let split = Split::new_with(id, *uuid, !self.horizontal);
-                            self.children[idx] = VSplitItem::Split(split);
+                            self.children[idx] = SplitItem::Split(split);
                         }
                         SplitSide::Right => {
                             let split = Split::new_with(*uuid, id, !self.horizontal);
-                            self.children[idx] = VSplitItem::Split(split);
+                            self.children[idx] = SplitItem::Split(split);
                         }
                     }
-                    return;
+                    return true;
                 }
-                VSplitItem::Split(split) => {
-                    split.split_append(target, id, side);
+                SplitItem::Split(split) => {
+                    if split.split_append(target, id, side) {
+                        return true;
+                    }
                 }
             }
         }
+
+        return false;
     }
 
     #[async_recursion::async_recursion(?Send)]
@@ -613,8 +627,8 @@ impl Split {
         for (idx, item) in self.children.iter().enumerate() {
             let uuid = item.uuid();
             let inner = match item {
-                VSplitItem::Widget(uuid) => nodes[uuid].render(),
-                VSplitItem::Split(split) => split.render_element(nodes).await,
+                SplitItem::Widget(uuid) => nodes[uuid].render(),
+                SplitItem::Split(split) => split.render_element(nodes).await,
             };
 
             rendered_elements.push(rsx! {
