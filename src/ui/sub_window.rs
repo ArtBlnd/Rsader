@@ -1,65 +1,68 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::widgets::Widget;
+use crate::ui::widgets::{BoxedWidget, WidgetElement};
 
+use async_channel::{Receiver, Sender};
 use dioxus::prelude::*;
-use once_cell::sync::OnceCell;
+
+use super::utils::MountedDataStorge;
 
 pub struct SubWindow {
     uuid: uuid::Uuid,
     name: String,
-    mount_data: Rc<OnceCell<Rc<MountedData>>>,
+    mount_data: Rc<RefCell<Option<Rc<MountedData>>>>,
 
-    widget: Box<dyn Widget>,
+    widget: BoxedWidget,
 }
 
 impl SubWindow {
-    pub fn new<T, W>(name: T, widget: W) -> Self
+    pub fn new<T>(name: T, widget: BoxedWidget) -> Self
     where
         T: Into<String>,
-        W: Widget + 'static,
     {
         Self {
             uuid: uuid::Uuid::new_v4(),
             name: name.into(),
-            mount_data: Rc::new(OnceCell::new()),
+            mount_data: Rc::new(RefCell::new(None)),
 
-            widget: Box::new(widget),
+            widget,
         }
     }
 }
 
 impl SubWindow {
-    fn render(&self, mut signal: Signal<Vec<SubWindowEvent>>) -> Element {
+    fn render(&self) -> Element {
         let uuid = self.uuid;
         let name = self.name.clone();
 
         let mount_data = self.mount_data.clone();
-
         rsx! {
             div {
                 class: "color-2 pane",
-                onmousedown: move |_| signal.write().push(SubWindowEvent::Focus(uuid)),
+                onmousedown: move |_| SubWindowMgrState::send(SubWindowEvent::Focus(uuid)),
                 onmounted: move |data| {
-                    let _ = mount_data.set(data.data().clone());
+                    *mount_data.borrow_mut() = Some(data.data());
                 },
 
-                SubWindowBar { name, uuid, signal }
-                { self.widget.render() }
+                SubwindowBar { name, uuid }
+                WidgetElement { widget: self.widget.clone() }
             }
         }
     }
 
     pub async fn position(&self) -> (f64, f64) {
-        let mount_data = self.mount_data.get().unwrap();
+        let mount_data = self.mount_data.borrow();
+        let mount_data = mount_data.as_ref().unwrap();
         let rect = mount_data.get_client_rect().await.unwrap();
 
         (rect.origin.x, rect.origin.y)
     }
 
     pub async fn size(&self) -> (f64, f64) {
-        let mount_data = self.mount_data.get().unwrap();
+        let mount_data = self.mount_data.borrow();
+        let mount_data = mount_data.as_ref().unwrap();
         let rect = mount_data.get_client_rect().await.unwrap();
 
         (rect.size.width, rect.size.height)
@@ -67,22 +70,16 @@ impl SubWindow {
 }
 
 #[component]
-fn SubWindowBar(name: String, uuid: uuid::Uuid, signal: Signal<Vec<SubWindowEvent>>) -> Element {
+fn SubwindowBar(name: String, uuid: uuid::Uuid) -> Element {
     rsx! {
-        div {
-            onmousedown: move |_| signal.write().push(SubWindowEvent::MouseDown(uuid)),
-            onmouseup: move |e| {
-                e.stop_propagation();
-                let coords = e.page_coordinates();
-                signal.write().push(SubWindowEvent::MouseUp(uuid, coords.x, coords.y))
-            },
+        div { onmousedown: move |_| SubWindowMgrState::send(SubWindowEvent::DragStart(uuid)),
 
             div { class: "color-2 subwindow-bar-title", {name} }
             div {
                 class: "font-color-w",
-                onmousedown: move |e| {
+                onmouseup: move |e| {
                     e.stop_propagation();
-                    signal.write().push(SubWindowEvent::Close(uuid));
+                    SubWindowMgrState::send(SubWindowEvent::Close(uuid));
                 },
                 "X"
             }
@@ -98,22 +95,28 @@ fn StylePrelude() -> Element {
     display: grid;
 }
 .pane {
+    height: 100%;
+    width: 100%;
     position: relative;
     overflow: hidden;
 }
 .splitter-h {
+    margin-left: -2px;
+    margin-right: -2px;
     position: absolute;
-    right: 0;
     z-index: 3;
     background: #000;
     cursor: ew-resize;
     top: 0;
-    width: 8px;
+    bottom: 0;
+    width: 2px;
 }
 .splitter-v {
+    margin-top: -2px;
+    margin-bottom: -2px;
     cursor: ns-resize;
     left: 0;
-    height: 8px;
+    height: 2px;
     position: absolute;
     right: 0;
     z-index: 3;
@@ -125,38 +128,43 @@ fn StylePrelude() -> Element {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
 pub enum SubWindowEvent {
-    MouseDown(uuid::Uuid),
-    MouseUp(uuid::Uuid, f64, f64),
-    MouseMove(uuid::Uuid, f64, f64),
+    DragStart(uuid::Uuid),
+    ResizeStart(uuid::Uuid, f64, f64),
+    OnMouseMove(f64, f64),
+    OnMouseUp(f64, f64),
     Close(uuid::Uuid),
     Focus(uuid::Uuid),
+    WindowCreation(BoxedWidget),
 }
+
+type RxEvent = Receiver<SubWindowEvent>;
+type TxEvent = Sender<SubWindowEvent>;
 
 pub struct SubWindowMgrState {
     windows: HashMap<uuid::Uuid, SubWindow>,
-    root: VSplit, // Tree of splits
+    root: Split, // Tree of splits
 
-    focused: uuid::Uuid,
     dragging: Option<uuid::Uuid>,
+    resizing: Option<(uuid::Uuid, f64, f64)>,
+    focused: uuid::Uuid,
+    changed: bool,
 }
 
 impl SubWindowMgrState {
     pub fn new() -> Self {
         Self {
             windows: HashMap::new(),
-            root: VSplit::new(),
+            root: Split::new(),
 
-            focused: uuid::Uuid::nil(),
             dragging: None,
+            resizing: None,
+            focused: uuid::Uuid::nil(),
+            changed: true,
         }
     }
 
-    pub fn append<W>(&mut self, widget: W)
-    where
-        W: Widget + 'static,
-    {
+    fn append(&mut self, widget: BoxedWidget) {
         let window = SubWindow::new("Untitled", widget);
         let window_uuid = window.uuid;
 
@@ -172,110 +180,235 @@ impl SubWindowMgrState {
         }
 
         self.windows.insert(window_uuid, window);
+        self.mark_changed();
     }
 
-    pub fn remove(&mut self, uuid: uuid::Uuid) {
+    fn remove(&mut self, uuid: uuid::Uuid) {
         self.root.remove(uuid);
-        self.windows.remove(&uuid);
+        assert!(self.windows.remove(&uuid).is_some());
 
         // If the focused window is removed, then set the focused window to the first window
         if self.focused == uuid {
             self.focused = self.root.first().unwrap_or(uuid::Uuid::nil());
         }
+
+        if self.dragging == Some(uuid) {
+            self.dragging = None;
+        }
+
+        self.mark_changed();
     }
 
-    pub fn render(&self, event_queue: Signal<Vec<SubWindowEvent>>) -> Element {
-        self.root.render_element(&self.windows, event_queue)
+    async fn find_window_at(&self, x: f64, y: f64) -> Option<uuid::Uuid> {
+        for (uuid, window) in self.windows.iter() {
+            let (wx, wy) = window.position().await;
+            let (ww, wh) = window.size().await;
+
+            if x >= wx && x <= wx + ww && y >= wy && y <= wy + wh {
+                return Some(*uuid);
+            }
+        }
+
+        None
     }
 
-    pub fn dispatch_mouse_down(&mut self, uuid: uuid::Uuid) {
+    async fn render_inner(&mut self) -> Element {
+        self.changed = false;
+        self.root.render_element(&self.windows).await
+    }
+
+    fn dispatch_drag_start(&mut self, uuid: uuid::Uuid) {
         self.dragging = Some(uuid);
     }
 
-    pub async fn dispatch_mouse_up(&mut self, id: uuid::Uuid, x: f64, y: f64) {
-        let Some(dragged) = self.dragging.take() else {
-            return;
-        };
-
-        assert!(self.windows.contains_key(&id));
-        assert!(self.windows.contains_key(&dragged));
-
-        if dragged == id {
-            return;
-        }
-
-        let (target_x, target_y) = self.windows[&id].position().await;
-        let (target_w, target_h) = self.windows[&id].size().await;
-
-        // Calculate where cursor is relative to the target window
-        let rel_x = x - target_x;
-        let rel_y = y - target_y;
-
-        // Calculate the split side
-        let side = if rel_y < target_h / 5.0 {
-            SplitSide::Top
-        } else if rel_y > target_h * 4.0 / 5.0 {
-            SplitSide::Bottom
-        } else {
-            if rel_x < target_w / 2.0 {
-                SplitSide::Left
-            } else {
-                SplitSide::Right
-            }
-        };
-
-        self.root.remove(dragged);
-        self.root.split_append(id, dragged, side);
+    fn dispatch_resize_start(&mut self, uuid: uuid::Uuid, x: f64, y: f64) {
+        self.resizing = Some((uuid, x, y));
     }
 
-    pub async fn dispatch_mouse_move(&mut self, uuid: uuid::Uuid, x: f64, y: f64) {}
+    pub async fn dispatch_mouse_move(&mut self, x: f64, y: f64) {
+        // subwindow dragging logic
+        if let Some(_) = self.dragging {
+            let Some(id) = self.find_window_at(x, y).await else {
+                return;
+            };
+
+            let (target_x, target_y) = self.windows[&id].position().await;
+            let (target_w, target_h) = self.windows[&id].size().await;
+
+            // Calculate where cursor is relative to the target window
+            let rel_x = x - target_x;
+            let rel_y = y - target_y;
+
+            // Calculate the split side
+            let side = if rel_y < target_h * 0.3 {
+                SplitSide::Top
+            } else if rel_y > target_h * 0.7 {
+                SplitSide::Bottom
+            } else {
+                if rel_x < target_w / 2.0 {
+                    SplitSide::Left
+                } else {
+                    SplitSide::Right
+                }
+            };
+
+            self.mark_changed();
+        }
+
+        if let Some((target, start_x, start_y)) = &mut self.resizing {
+            let diff_x = x - *start_x;
+            let diff_y = y - *start_y;
+            *start_x = x;
+            *start_y = y;
+
+            self.root.resize(*target, diff_x, diff_y).await;
+            self.mark_changed();
+        }
+    }
+
+    async fn dispatch_mouse_up(&mut self, x: f64, y: f64) {
+        // Subwindow dragging logic
+        if let Some(id) = self.dragging.take() {
+            let Some(target) = self.find_window_at(x, y).await else {
+                return;
+            };
+
+            if self.windows.get(&id).is_none() || self.windows.get(&target).is_none() {
+                return;
+            }
+
+            if target == id {
+                return;
+            }
+
+            let (target_x, target_y) = self.windows[&target].position().await;
+            let (target_w, target_h) = self.windows[&target].size().await;
+
+            // Calculate where cursor is relative to the target window
+            let rel_x = x - target_x;
+            let rel_y = y - target_y;
+
+            // Calculate the split side
+            let side = if rel_y < target_h * 0.2 {
+                SplitSide::Top
+            } else if rel_y > target_h * 0.8 {
+                SplitSide::Bottom
+            } else {
+                if rel_x < target_w / 2.0 {
+                    SplitSide::Left
+                } else {
+                    SplitSide::Right
+                }
+            };
+
+            self.root.remove(id);
+            self.root.split_append(target, id, side);
+            self.mark_changed();
+        }
+
+        self.resizing = None;
+    }
+
+    pub fn mark_changed(&mut self) {
+        self.changed = true;
+    }
+
+    pub fn is_changed(&mut self) -> bool {
+        self.changed
+    }
+
+    pub fn pipe_instance() -> &'static (TxEvent, RxEvent) {
+        use once_cell::sync::Lazy;
+        static PIPE: Lazy<(TxEvent, RxEvent)> = Lazy::new(|| async_channel::unbounded());
+
+        &PIPE
+    }
+
+    pub fn send(event: SubWindowEvent) {
+        let _ = Self::pipe_instance().0.try_send(event);
+    }
+
+    pub fn tx() -> TxEvent {
+        Self::pipe_instance().0.clone()
+    }
+
+    pub fn rx() -> RxEvent {
+        Self::pipe_instance().1.clone()
+    }
 }
 
 #[component]
-pub fn SubWindowMgr(mut state: Signal<SubWindowMgrState>) -> Element {
-    let mut event_queue = use_signal(|| Vec::new());
-    let mut dispatch_event = use_future(move || async move {
-        let mut events = event_queue.write();
+pub fn SubWindowMgr() -> Element {
+    let mut pre_rendered = use_resource(|| async {
+        let mut state = use_signal(|| SubWindowMgrState::new());
+        let rx = SubWindowMgrState::rx();
+
         let mut state = state.write();
+        while !state.is_changed() {
+            let mut events = vec![rx.recv().await.unwrap()];
+            for _ in 0..64 {
+                if let Ok(event) = rx.try_recv() {
+                    events.push(event);
+                } else {
+                    break;
+                }
+            }
 
-        for event in events.drain(..) {
-            match event {
-                // Events for window dragging and re-positioning functionality
-                SubWindowEvent::MouseDown(uuid) => {
-                    state.dispatch_mouse_down(uuid);
-                }
-                SubWindowEvent::MouseUp(uuid, x, y) => {
-                    state.dispatch_mouse_up(uuid, x, y).await;
-                }
-                SubWindowEvent::MouseMove(uuid, x, y) => {
-                    state.dispatch_mouse_move(uuid, x, y).await;
-                }
-
-                // Events for basic window management functionality
-                SubWindowEvent::Close(uuid) => {
-                    state.remove(uuid);
-                }
-                SubWindowEvent::Focus(uuid) => {
-                    state.focused = uuid;
+            for event in events {
+                match event {
+                    SubWindowEvent::DragStart(uuid) => {
+                        state.dispatch_drag_start(uuid);
+                    }
+                    SubWindowEvent::ResizeStart(uuid, x, y) => {
+                        state.dispatch_resize_start(uuid, x, y);
+                    }
+                    SubWindowEvent::OnMouseMove(x, y) => {
+                        state.dispatch_mouse_move(x, y).await;
+                    }
+                    SubWindowEvent::OnMouseUp(x, y) => {
+                        state.dispatch_mouse_up(x, y).await;
+                    }
+                    SubWindowEvent::Close(uuid) => {
+                        state.remove(uuid);
+                    }
+                    SubWindowEvent::Focus(uuid) => {
+                        state.focused = uuid;
+                        state.mark_changed();
+                    }
+                    SubWindowEvent::WindowCreation(widget) => {
+                        state.append(widget);
+                    }
                 }
             }
         }
+
+        let element = state.render_inner().await;
+        wait_for_next_render().await;
+
+        element
     });
 
-    if !event_queue.read().is_empty() {
-        // Do not write to the state if there are no events
-        // It will cause infinite write ~ read loop
-        if dispatch_event.finished() {
-            dispatch_event.restart();
-        }
-
-        return None;
+    let element = pre_rendered.read().clone();
+    if pre_rendered.finished() {
+        pre_rendered.restart();
     }
 
     rsx! {
         div {
+            style: "display: flex; flex-direction: column; width: 100%; overflow: hidden;",
+            onmousemove: move |e| {
+                e.stop_propagation();
+                let coords = e.client_coordinates();
+                SubWindowMgrState::send(SubWindowEvent::OnMouseMove(coords.x, coords.y));
+            },
+            onmouseup: move |e| {
+                e.stop_propagation();
+                let coords = e.client_coordinates();
+                SubWindowMgrState::send(SubWindowEvent::OnMouseUp(coords.x, coords.y));
+            },
+
             StylePrelude {}
-            { state.read().render(event_queue) }
+            { element }
         }
     }
 }
@@ -288,187 +421,243 @@ enum SplitSide {
     Bottom,
 }
 
-#[derive(Debug)]
+impl SplitSide {
+    fn rotate(&self) -> Self {
+        match self {
+            SplitSide::Left => SplitSide::Top,
+            SplitSide::Right => SplitSide::Bottom,
+            SplitSide::Top => SplitSide::Right,
+            SplitSide::Bottom => SplitSide::Left,
+        }
+    }
+}
+
 enum VSplitItem {
     Widget(uuid::Uuid),
-    HSplit(HSplit),
+    Split(Split),
 }
 
-#[derive(Debug)]
-struct VSplit {
+impl VSplitItem {
+    pub fn uuid(&self) -> uuid::Uuid {
+        match self {
+            VSplitItem::Widget(uuid) => *uuid,
+            VSplitItem::Split(split) => split.uuid,
+        }
+    }
+}
+
+struct Split {
     children: Vec<VSplitItem>,
+    children_ratio: Vec<f64>,
+
+    uuid: uuid::Uuid,
+    rect: MountedDataStorge,
+    horizontal: bool,
 }
 
-impl VSplit {
+impl Split {
     fn new() -> Self {
         Self {
             children: Vec::new(),
+            children_ratio: Vec::new(),
+
+            uuid: uuid::Uuid::new_v4(),
+            rect: MountedDataStorge::new(),
+            horizontal: false,
+        }
+    }
+
+    fn new_with(top: uuid::Uuid, bottom: uuid::Uuid, horizontal: bool) -> Self {
+        Self {
+            children: vec![VSplitItem::Widget(top), VSplitItem::Widget(bottom)],
+            children_ratio: vec![0.5, 0.5],
+
+            uuid: uuid::Uuid::new_v4(),
+            rect: MountedDataStorge::new(),
+            horizontal,
         }
     }
 
     fn first(&self) -> Option<uuid::Uuid> {
         match self.children.first() {
             Some(VSplitItem::Widget(uuid)) => Some(*uuid),
-            Some(VSplitItem::HSplit(hsplit)) => hsplit.first(),
+            Some(VSplitItem::Split(split)) => split.first(),
             None => None,
         }
     }
 
     fn remove(&mut self, id: uuid::Uuid) -> bool {
-        self.children.retain_mut(|item| match item {
-            VSplitItem::Widget(uuid) => *uuid != id,
-            // Remove if the split is empty
-            VSplitItem::HSplit(hsplit) => !hsplit.remove(id),
-        });
+        if let Some(target) = self.find(id) {
+            self.remove_and_rebalance(target);
+        } else {
+            for (idx, item) in self.children.iter_mut().enumerate() {
+                if let VSplitItem::Split(split) = item {
+                    if split.remove(id) {
+                        self.remove_and_rebalance(idx);
+                    }
+
+                    break;
+                }
+            }
+        }
 
         self.children.is_empty()
     }
 
+    fn remove_and_rebalance(&mut self, idx: usize) {
+        self.children_ratio.remove(idx);
+        self.children.remove(idx);
+
+        // rebalance the ratios
+        let total_ratio = self.children_ratio.iter().sum::<f64>();
+        for ratio in self.children_ratio.iter_mut() {
+            *ratio /= total_ratio;
+        }
+    }
+
     fn append(&mut self, id: uuid::Uuid) {
         self.children.push(VSplitItem::Widget(id));
+
+        if self.children_ratio.is_empty() {
+            self.children_ratio.push(1.0);
+        } else {
+            let ratio = 1.0 / (self.children_ratio.len() + 1) as f64;
+            for r in self.children_ratio.iter_mut() {
+                *r -= ratio;
+            }
+            self.children_ratio.push(ratio);
+        }
+    }
+
+    fn find(&self, id: uuid::Uuid) -> Option<usize> {
+        self.children.iter().position(|item| item.uuid() == id)
+    }
+
+    async fn px_per_ratio(&self) -> f64 {
+        let rect = self.rect.get().get_client_rect().await.unwrap();
+        if self.horizontal {
+            1.0 / rect.size.width
+        } else {
+            1.0 / rect.size.height
+        }
+    }
+
+    #[async_recursion::async_recursion(?Send)]
+    async fn resize(&mut self, id: uuid::Uuid, w: f64, h: f64) {
+        let amount_px = if self.horizontal { w } else { h };
+        let amount = amount_px * self.px_per_ratio().await;
+        if let Some(target) = self.find(id) {
+            self.children_ratio[target] -= amount;
+            self.children_ratio[target - 1] += amount;
+        } else {
+            for item in self.children.iter_mut() {
+                if let VSplitItem::Split(split) = item {
+                    split.resize(id, w, h).await;
+                }
+            }
+        }
     }
 
     fn split_append(&mut self, target: uuid::Uuid, id: uuid::Uuid, side: SplitSide) {
         for (idx, item) in self.children.iter_mut().enumerate() {
+            let ratio = self.children_ratio[idx];
             match item {
                 VSplitItem::Widget(uuid) => {
                     if *uuid != target {
                         continue;
                     }
 
-                    self.children.insert(idx, VSplitItem::Widget(id));
+                    let side = if self.horizontal { side.rotate() } else { side };
+                    match side {
+                        SplitSide::Top => {
+                            self.children.insert(idx, VSplitItem::Widget(id));
+                            self.children_ratio.insert(idx, ratio / 2.0);
+                            self.children_ratio[idx + 1] = ratio / 2.0;
+                        }
+                        SplitSide::Bottom => {
+                            self.children.insert(idx + 1, VSplitItem::Widget(id));
+                            self.children_ratio.insert(idx + 1, ratio / 2.0);
+                            self.children_ratio[idx] = ratio / 2.0;
+                        }
+                        SplitSide::Left => {
+                            let split = Split::new_with(id, *uuid, !self.horizontal);
+                            self.children[idx] = VSplitItem::Split(split);
+                        }
+                        SplitSide::Right => {
+                            let split = Split::new_with(*uuid, id, !self.horizontal);
+                            self.children[idx] = VSplitItem::Split(split);
+                        }
+                    }
                     return;
                 }
-                VSplitItem::HSplit(hsplit) => {
-                    hsplit.split_append(target, id, side);
+                VSplitItem::Split(split) => {
+                    split.split_append(target, id, side);
                 }
             }
         }
     }
 
-    fn render_element(
-        &self,
-        nodes: &HashMap<uuid::Uuid, SubWindow>,
-        signal: Signal<Vec<SubWindowEvent>>,
-    ) -> Element {
+    #[async_recursion::async_recursion(?Send)]
+    async fn render_element(&self, nodes: &HashMap<uuid::Uuid, SubWindow>) -> Element {
         if self.children.is_empty() {
             return None;
         }
 
-        if self.children.len() == 1 {
-            return match &self.children[0] {
-                VSplitItem::Widget(uuid) => nodes[uuid].render(signal),
-                VSplitItem::HSplit(hsplit) => hsplit.render_element(nodes, signal),
+        let divider_class = if self.horizontal {
+            "splitter-h"
+        } else {
+            "splitter-v"
+        };
+
+        let mut rendered_elements = Vec::new();
+        for (idx, item) in self.children.iter().enumerate() {
+            let uuid = item.uuid();
+            let inner = match item {
+                VSplitItem::Widget(uuid) => nodes[uuid].render(),
+                VSplitItem::Split(split) => split.render_element(nodes).await,
             };
-        }
 
-        rsx! {
-            div { class: "pane panes",
-                for item in self.children.iter() {
-                    div {
-                        match item {
-                            VSplitItem::Widget(uuid) => nodes[uuid].render(signal),
-                            VSplitItem::HSplit(hsplit) => hsplit.render_element(nodes, signal),
-                        },
+            rendered_elements.push(rsx! {
+                div { key: "{item.uuid()}",
 
+                    // divider
+                    if idx != 0 {
                         div {
-                            class: "splitter-v",
-                            onmousedown: |e| {
-                                let a = 1;
-                            },
-                            onmouseup: |e| {
-                                let b = 1;
-                            },
-                            onmousemove: |e| {
-                                let c = 1;
+                            class: "{divider_class}",
+                            onmousedown: move |e| {
+                                e.stop_propagation();
+                                let coords = e.client_coordinates();
+                                SubWindowMgrState::send(SubWindowEvent::ResizeStart(uuid, coords.x, coords.y));
                             }
                         }
                     }
+
+                    // sub window itself
+                    { inner }
                 }
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-enum HSplitItem {
-    Widget(uuid::Uuid),
-    VSplit(VSplit),
-}
-
-#[derive(Debug)]
-struct HSplit {
-    children: Vec<HSplitItem>,
-}
-
-impl HSplit {
-    fn new() -> Self {
-        Self {
-            children: Vec::new(),
-        }
-    }
-
-    fn first(&self) -> Option<uuid::Uuid> {
-        match self.children.first() {
-            Some(HSplitItem::Widget(uuid)) => Some(*uuid),
-            Some(HSplitItem::VSplit(vsplit)) => vsplit.first(),
-            None => None,
-        }
-    }
-
-    fn remove(&mut self, id: uuid::Uuid) -> bool {
-        self.children.retain_mut(|item| match item {
-            HSplitItem::Widget(uuid) => *uuid != id,
-            HSplitItem::VSplit(vsplit) => !vsplit.remove(id),
-        });
-
-        self.children.is_empty()
-    }
-
-    fn split_append(&mut self, target: uuid::Uuid, id: uuid::Uuid, side: SplitSide) {
-        for (idx, item) in self.children.iter_mut().enumerate() {
-            match item {
-                HSplitItem::Widget(uuid) => {
-                    if *uuid != target {
-                        continue;
-                    }
-
-                    self.children.insert(idx, HSplitItem::Widget(id));
-                    return;
-                }
-                HSplitItem::VSplit(vsplit) => {
-                    vsplit.split_append(target, id, side);
-                }
-            }
-        }
-    }
-
-    fn render_element(
-        &self,
-        nodes: &HashMap<uuid::Uuid, SubWindow>,
-        signal: Signal<Vec<SubWindowEvent>>,
-    ) -> Element {
-        if self.children.is_empty() {
-            return None;
+            })
         }
 
-        if self.children.len() == 1 {
-            return match &self.children[0] {
-                HSplitItem::Widget(uuid) => nodes[uuid].render(signal),
-                HSplitItem::VSplit(vsplit) => vsplit.render_element(nodes, signal),
-            };
-        }
+        let grid_templete_ratio = self
+            .children_ratio
+            .iter()
+            .map(|ratio| format!("{}fr ", ratio))
+            .collect::<String>();
 
+        let style = if self.horizontal {
+            format!("grid-auto-flow: column; grid-template-columns: {grid_templete_ratio}")
+        } else {
+            format!("grid-auto-flow: row; grid-template-rows: {grid_templete_ratio}")
+        };
+
+        let rect = self.rect.clone();
         rsx! {
-            div { class: "pane panes",
-                for item in self.children.iter() {
-                    div {
-                        match item {
-                            HSplitItem::Widget(uuid) => nodes[uuid].render(signal),
-                            HSplitItem::VSplit(vsplit) => vsplit.render_element(nodes, signal),
-                        },
-                        div { class: "splitter-h" }
-                    }
+            div {
+                class: "pane panes",
+                style: "{style}",
+                onmounted: move |data| { rect.set(data.data()) },
+                for element in rendered_elements.iter() {
+                    { element }
                 }
             }
         }

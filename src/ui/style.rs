@@ -7,11 +7,12 @@ pub fn StyleMainWindow() -> Element {
     width: 100%;
     height: 100%;
     background-color: black;
+    display: flex;
 }
     "#;
 
     rsx! {
-        style { { text} }
+        style { { text } }
     }
 }
 

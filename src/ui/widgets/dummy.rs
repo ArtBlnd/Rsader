@@ -16,9 +16,14 @@ impl Dummy {
 
 impl Widget for Dummy {
     fn render(&self) -> Element {
+        tracing::info!("Rendering Dummy widget");
         let uuid = self.uuid.to_string();
         rsx! {
             div { class: "font-color-w font1", "{uuid}" }
         }
+    }
+
+    fn is_changed_after_render(&self) -> bool {
+        false
     }
 }

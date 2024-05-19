@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::ui::style::*;
-use crate::ui::sub_window::{SubWindowMgr, SubWindowMgrState};
+use crate::ui::sub_window::{SubWindowEvent, SubWindowMgr, SubWindowMgrState};
 use crate::ui::widgets::Dummy;
 
 #[component]
@@ -21,17 +21,15 @@ pub fn App() -> Element {
 
 #[component]
 pub fn MainWindow() -> Element {
-    let mut state = use_signal(|| SubWindowMgrState::new());
-
     rsx! {
         button {
             class: "rbutton",
             onmousedown: move |_| {
-                state.write().append(Dummy::new());
+                SubWindowMgrState::send(SubWindowEvent::WindowCreation(Dummy::new().into()));
             },
             "Add SubWindow"
         }
 
-        SubWindowMgr { state }
+        SubWindowMgr {}
     }
 }
