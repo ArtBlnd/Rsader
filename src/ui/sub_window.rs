@@ -30,7 +30,7 @@ impl SubWindow {
 impl SubWindow {
     fn render(&self) -> Element {
         let uuid = self.uuid;
-        let name = self.widget.as_ref().name();
+        let name = self.widget.name();
 
         let mount_data = self.mount_data.clone();
         rsx! {
@@ -304,6 +304,7 @@ impl SubWindowMgrState {
 
             assert!(self.root.remove(id));
             self.root.split_append(target, id, side);
+            self.root.sanitize_ratio().await;
             self.mark_changed();
         }
 
@@ -547,13 +548,46 @@ impl Split {
         }
     }
 
+    async fn sanitize_ratio(&mut self) {
+        // Sanitize the total ratio to be 1.0
+        let total = self.children_ratio.iter().sum::<f64>();
+        for ratio in self.children_ratio.iter_mut() {
+            *ratio /= total;
+        }
+
+        // Sanitize the min ratio to be 100px
+        let min_amount = 100.0 * self.px_per_ratio().await;
+        let mut debt = 0.0;
+        for ratio in self.children_ratio.iter_mut() {
+            if *ratio < min_amount {
+                *ratio = min_amount;
+                debt += min_amount - *ratio;
+            } else {
+                *ratio += debt;
+                debt = 0.0;
+            }
+        }
+    }
+
     #[async_recursion::async_recursion(?Send)]
     async fn resize(&mut self, id: uuid::Uuid, w: f64, h: f64) {
         let amount_px = if self.horizontal { w } else { h };
         let amount = amount_px * self.px_per_ratio().await;
+        let min_amount = 100.0 * self.px_per_ratio().await;
         if let Some(target) = self.find(id) {
+            let old_ratio0 = self.children_ratio[target];
+            let old_ratio1 = self.children_ratio[target - 1];
+
             self.children_ratio[target] -= amount;
             self.children_ratio[target - 1] += amount;
+
+            let cur_ratio0 = self.children_ratio[target];
+            let cur_ratio1 = self.children_ratio[target - 1];
+
+            if cur_ratio0 < min_amount || cur_ratio1 < min_amount {
+                self.children_ratio[target] = old_ratio0;
+                self.children_ratio[target - 1] = old_ratio1;
+            }
         } else {
             for item in self.children.iter_mut() {
                 if let SplitItem::Split(split) = item {
@@ -650,7 +684,7 @@ impl Split {
         let grid_templete_ratio = self
             .children_ratio
             .iter()
-            .map(|ratio| format!("minmax(100px, {}fr) ", ratio))
+            .map(|ratio| format!("{}fr ", ratio))
             .collect::<String>();
 
         let style = if self.horizontal {

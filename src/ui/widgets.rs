@@ -1,5 +1,5 @@
 mod orderbook;
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 pub use orderbook::*;
 mod dummy;
@@ -22,12 +22,6 @@ pub trait Widget {
 #[derive(Clone)]
 pub struct BoxedWidget(Arc<dyn Widget + Send + Sync + 'static>);
 
-impl BoxedWidget {
-    pub fn as_ref(&self) -> &dyn Widget {
-        &*self.0
-    }
-}
-
 impl<W> From<W> for BoxedWidget
 where
     W: Widget + Send + Sync + 'static,
@@ -40,6 +34,20 @@ where
 impl PartialEq for BoxedWidget {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0) && !self.0.is_changed_after_render()
+    }
+}
+
+impl AsRef<dyn Widget> for BoxedWidget {
+    fn as_ref(&self) -> &(dyn Widget + 'static) {
+        self.0.as_ref()
+    }
+}
+
+impl Deref for BoxedWidget {
+    type Target = dyn Widget;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref()
     }
 }
 
