@@ -23,6 +23,10 @@ impl Widget for Dummy {
         }
     }
 
+    fn name(&self) -> String {
+        "Dummy".to_string()
+    }
+
     fn is_changed_after_render(&self) -> bool {
         false
     }

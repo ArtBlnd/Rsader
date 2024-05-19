@@ -11,20 +11,15 @@ use super::utils::MountedDataStorge;
 
 pub struct SubWindow {
     uuid: uuid::Uuid,
-    name: String,
     mount_data: Rc<RefCell<Option<Rc<MountedData>>>>,
 
     widget: BoxedWidget,
 }
 
 impl SubWindow {
-    pub fn new<T>(name: T, widget: BoxedWidget) -> Self
-    where
-        T: Into<String>,
-    {
+    pub fn new(widget: BoxedWidget) -> Self {
         Self {
             uuid: uuid::Uuid::new_v4(),
-            name: name.into(),
             mount_data: Rc::new(RefCell::new(None)),
 
             widget,
@@ -35,7 +30,7 @@ impl SubWindow {
 impl SubWindow {
     fn render(&self) -> Element {
         let uuid = self.uuid;
-        let name = self.name.clone();
+        let name = self.widget.as_ref().name();
 
         let mount_data = self.mount_data.clone();
         rsx! {
@@ -74,7 +69,7 @@ fn SubwindowBar(name: String, uuid: uuid::Uuid) -> Element {
     rsx! {
         div { onmousedown: move |_| SubWindowMgrState::send(SubWindowEvent::DragStart(uuid)),
 
-            div { class: "color-2 subwindow-bar-title", {name} }
+            div { class: "color-2 font-color-w", {name} }
             div {
                 class: "font-color-w",
                 onmouseup: move |e| {
@@ -165,7 +160,7 @@ impl SubWindowMgrState {
     }
 
     fn append(&mut self, widget: BoxedWidget) {
-        let window = SubWindow::new("Untitled", widget);
+        let window = SubWindow::new(widget);
         let window_uuid = window.uuid;
 
         if self.windows.is_empty() {
@@ -655,7 +650,7 @@ impl Split {
         let grid_templete_ratio = self
             .children_ratio
             .iter()
-            .map(|ratio| format!("{}fr ", ratio))
+            .map(|ratio| format!("minmax(100px, {}fr) ", ratio))
             .collect::<String>();
 
         let style = if self.horizontal {

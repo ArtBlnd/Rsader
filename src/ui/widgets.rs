@@ -10,6 +10,7 @@ use dioxus::prelude::*;
 /// A trait for all widgets
 pub trait Widget {
     fn render(&self) -> Element;
+    fn name(&self) -> String;
 
     /// Returns true if the widget should be re-rendered after the render phase
     fn is_changed_after_render(&self) -> bool {
@@ -20,6 +21,12 @@ pub trait Widget {
 
 #[derive(Clone)]
 pub struct BoxedWidget(Arc<dyn Widget + Send + Sync + 'static>);
+
+impl BoxedWidget {
+    pub fn as_ref(&self) -> &dyn Widget {
+        &*self.0
+    }
+}
 
 impl<W> From<W> for BoxedWidget
 where
