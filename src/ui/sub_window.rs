@@ -1,6 +1,4 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use crate::ui::widgets::{BoxedWidget, WidgetElement};
 
@@ -11,7 +9,7 @@ use super::utils::MountedDataStorge;
 
 pub struct SubWindow {
     uuid: uuid::Uuid,
-    mount_data: Rc<RefCell<Option<Rc<MountedData>>>>,
+    mount_data: MountedDataStorge,
 
     widget: BoxedWidget,
 }
@@ -20,7 +18,7 @@ impl SubWindow {
     pub fn new(widget: BoxedWidget) -> Self {
         Self {
             uuid: uuid::Uuid::new_v4(),
-            mount_data: Rc::new(RefCell::new(None)),
+            mount_data: MountedDataStorge::new(),
 
             widget,
         }
@@ -37,9 +35,7 @@ impl SubWindow {
             div {
                 class: "color-2 pane",
                 onmousedown: move |_| SubWindowMgrState::send(SubWindowEvent::Focus(uuid)),
-                onmounted: move |data| {
-                    *mount_data.borrow_mut() = Some(data.data());
-                },
+                onmounted: move |data| { mount_data.set(data.data()) },
 
                 SubwindowBar { name, uuid }
                 WidgetElement { widget: self.widget.clone() }
@@ -48,16 +44,14 @@ impl SubWindow {
     }
 
     pub async fn position(&self) -> (f64, f64) {
-        let mount_data = self.mount_data.borrow();
-        let mount_data = mount_data.as_ref().unwrap();
+        let mount_data = self.mount_data.get();
         let rect = mount_data.get_client_rect().await.unwrap();
 
         (rect.origin.x, rect.origin.y)
     }
 
     pub async fn size(&self) -> (f64, f64) {
-        let mount_data = self.mount_data.borrow();
-        let mount_data = mount_data.as_ref().unwrap();
+        let mount_data = self.mount_data.get();
         let rect = mount_data.get_client_rect().await.unwrap();
 
         (rect.size.width, rect.size.height)
