@@ -19,7 +19,7 @@ impl Widget for Dummy {
         tracing::info!("Rendering Dummy widget");
         let uuid = self.uuid.to_string();
         rsx! {
-            div { class: "font-color-w font1", "{uuid}" }
+            div { class: "font-color-main font1", "{uuid}" }
         }
     }
 

@@ -61,11 +61,21 @@ impl SubWindow {
 #[component]
 fn SubwindowBar(name: String, uuid: uuid::Uuid) -> Element {
     rsx! {
-        div { onmousedown: move |_| SubWindowMgrState::send(SubWindowEvent::DragStart(uuid)),
+        div {
+            onmousedown: move |_| SubWindowMgrState::send(SubWindowEvent::DragStart(uuid)),
+            class: "color-3",
+            style: "display: flex; flex-direction: row;",
 
-            div { class: "color-2 font-color-w", {name} }
             div {
-                class: "font-color-w",
+                class: "font-color-main unselectable",
+                style: "padding: 4px; cursor: move; width: 100%;",
+
+                {name}
+            }
+            div {
+                class: "font-color-main unselectable",
+                style: "padding: 4px; cursor: pointer; width: 20px; text-align: center;",
+
                 onmouseup: move |e| {
                     e.stop_propagation();
                     SubWindowMgrState::send(SubWindowEvent::Close(uuid));
@@ -90,8 +100,7 @@ fn StylePrelude() -> Element {
     overflow: hidden;
 }
 .splitter-h {
-    margin-left: -2px;
-    margin-right: -2px;
+    margin-left: -1px;
     position: absolute;
     z-index: 3;
     background: #000;
@@ -101,8 +110,8 @@ fn StylePrelude() -> Element {
     width: 2px;
 }
 .splitter-v {
-    margin-top: -2px;
-    margin-bottom: -2px;
+    float: left;
+    margin-top: -1px;
     cursor: ns-resize;
     left: 0;
     height: 2px;
@@ -110,7 +119,18 @@ fn StylePrelude() -> Element {
     right: 0;
     z-index: 3;
     background: #000;
-}"#;
+}
+.splitter-h:hover {
+    margin-left: -3px;
+    width: 6px;
+    background: #333;
+}
+.splitter-v:hover {
+    margin-top: -3px;
+    height: 6px;
+    background: #333;
+}
+"#;
 
     rsx! {
         style { {text} }
@@ -567,7 +587,7 @@ impl Split {
     async fn resize(&mut self, id: uuid::Uuid, w: f64, h: f64) {
         let amount_px = if self.horizontal { w } else { h };
         let amount = amount_px * self.px_per_ratio().await;
-        let min_amount = 100.0 * self.px_per_ratio().await;
+        let min_amount = 200.0 * self.px_per_ratio().await;
         if let Some(target) = self.find(id) {
             let old_ratio0 = self.children_ratio[target];
             let old_ratio1 = self.children_ratio[target - 1];
@@ -575,9 +595,9 @@ impl Split {
             self.children_ratio[target] -= amount;
             self.children_ratio[target - 1] += amount;
 
+            // Rollback if the ratio is less than min_amount
             let cur_ratio0 = self.children_ratio[target];
             let cur_ratio1 = self.children_ratio[target - 1];
-
             if cur_ratio0 < min_amount || cur_ratio1 < min_amount {
                 self.children_ratio[target] = old_ratio0;
                 self.children_ratio[target - 1] = old_ratio1;

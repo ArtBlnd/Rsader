@@ -1,6 +1,24 @@
 use dioxus::prelude::*;
 
 #[component]
+pub fn StylePrelude() -> Element {
+    let text = r#"
+.unselectable {
+    user-drag: none; 
+    user-select: none;
+    -moz-user-select: none;
+    -webkit-user-drag: none;
+    -webkit-user-select: none;
+    -ms-user-select: none;
+}
+    "#;
+
+    rsx! {
+        style { { text } }
+    }
+}
+
+#[component]
 pub fn StyleMainWindow() -> Element {
     let text = r#"
 .main-window {
@@ -60,7 +78,7 @@ pub fn StyleFont() -> Element {
     });
 
     // Append font color
-    let text = format!("{}\n.font-color-w {{ color: white; }}", text);
+    let text = format!("{}\n.font-color-main {{ color: white; }}", text);
     let text = format!("{}\n.font-color-b {{ color: black; }}", text);
 
     rsx! {

@@ -8,6 +8,7 @@ use crate::ui::widgets::Dummy;
 pub fn App() -> Element {
     rsx! {
         // Basic element styles
+        StylePrelude {}
         StyleMainWindow {}
         StyleFont {}
         StyleColor {}
