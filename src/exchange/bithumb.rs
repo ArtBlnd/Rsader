@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parking_lot::RwLock;
@@ -8,8 +8,9 @@ use unwrap_let::unwrap_let;
 
 use crate::config::Config;
 use crate::dec;
-use crate::utils::broadcaster::Subscription;
+use crate::utils::broadcaster::{Broadcaster, Subscription};
 use crate::utils::Decimal;
+use crate::websocket::Websocket;
 use crate::{
     currency::Currency,
     exchange::{Balance, Order, OrderState, Unit},
@@ -725,6 +726,23 @@ pub enum BithumbItem {
         cont_amt: Decimal,
         cont_price: Decimal,
     },
+}
+
+pub struct RealtimeDataBroadcaster {
+    subscribed: Arc<Mutex<HashSet<(Currency, Currency)>>>,
+    broadcaster: Broadcaster<RealtimeData>,
+
+    ws: Websocket,
+}
+
+impl RealtimeDataBroadcaster {
+    pub fn new() -> Self {
+        Self {
+            subscribed: Arc::new(Mutex::new(HashSet::new())),
+            broadcaster: Broadcaster::new(),
+            ws: Websocket::new("wss://pubwss.bithumb.com/pub/ws"),
+        }
+    }
 }
 
 #[cfg(test)]

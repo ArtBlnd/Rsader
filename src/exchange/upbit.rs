@@ -1,29 +1,29 @@
-use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
-
-use crate::{
-    dec,
-    utils::{
-        broadcaster::{Broadcaster, Subscription},
-        Decimal,
-    },
+use std::{
+    collections::HashSet,
+    str::FromStr,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
-use parking_lot::RwLock;
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use unwrap_let::unwrap_let;
 
+use super::{CandleSticks, Exchange, Market, OrderToken, Orderbook, RealtimeData, Trade};
 use crate::{
     config::Config,
     currency::{Currency, CurrencyPairDelimiterStringifier, CurrencyPairStringifier},
+    dec,
     exchange::{Balance, Order, OrderState, Unit},
     utils::{
         async_helpers,
-        http::{client, Client},
+        broadcaster::{Broadcaster, Subscription},
+        http,
+        http::Client,
+        Decimal,
     },
     websocket::Websocket,
 };
-
-use super::{CandleSticks, Exchange, Market, OrderToken, Orderbook, RealtimeData};
 
 fn access_key() -> Result<&'static str, UpbitError> {
     Config::get()
@@ -87,15 +87,18 @@ pub enum UpbitError {
 }
 
 pub struct Upbit {
-    subscribed_pairs: Arc<RwLock<HashSet<(Currency, Currency)>>>,
+    broadcaster: RealtimeDataBroadcaster,
     http_client: Client,
 }
 
 impl Upbit {
     pub fn new() -> Self {
+        let broadcaster = RealtimeDataBroadcaster::new();
+        broadcaster.spawn_and_broadcast();
+
         Self {
-            subscribed_pairs: Arc::new(RwLock::new(HashSet::new())),
-            http_client: client(),
+            broadcaster,
+            http_client: http::client(),
         }
     }
 }
@@ -110,7 +113,7 @@ impl Exchange for Upbit {
         pair: (Currency, Currency),
         _market: Option<Market>,
     ) -> Subscription<RealtimeData> {
-        todo!()
+        self.broadcaster.subscribe(pair)
     }
 
     async fn orderbook(
@@ -612,6 +615,116 @@ pub struct UpbitOrderbookUnit {
     pub ask_size: Decimal,
     pub bid_price: Decimal,
     pub bid_size: Decimal,
+}
+
+#[derive(Clone)]
+struct RealtimeDataBroadcaster {
+    subscribed: Arc<Mutex<HashSet<(Currency, Currency)>>>,
+    broadcaster: Broadcaster<RealtimeData>,
+
+    ws: Websocket,
+}
+
+impl RealtimeDataBroadcaster {
+    pub fn new() -> Self {
+        Self {
+            subscribed: Arc::new(Mutex::new(HashSet::new())),
+            broadcaster: Broadcaster::new(),
+            ws: Websocket::new("wss://api.upbit.com/websocket/v1"),
+        }
+    }
+
+    pub fn spawn_and_broadcast(&self) {
+        let broadcaster = self.clone();
+        async_helpers::spawn(async move {
+            loop {
+                broadcaster.recv_and_broadcast().await;
+            }
+        });
+    }
+
+    pub fn subscribe(&self, pair: (Currency, Currency)) -> Subscription<RealtimeData> {
+        let mut subscribed = self.subscribed.lock().unwrap();
+        if !subscribed.insert(pair) {
+            return self.broadcaster.subscribe();
+        }
+
+        let subscribed = subscribed
+            .iter()
+            .cloned()
+            .map(|(c1, c2)| CurrencyPairDelimiterStringifier::<'-'>::stringify(c2, c1))
+            .collect::<Vec<_>>();
+
+        let message = json!([
+            {
+                "ticket": "rsader"
+            },
+            {
+                "type": "trade",
+                "codes": subscribed,
+            },
+            {
+                "type": "orderbook",
+                "codes": subscribed,
+            }
+        ]);
+
+        self.ws.send_blocking(&message.to_string());
+        self.broadcaster.subscribe()
+    }
+
+    pub async fn recv_and_broadcast(&self) {
+        let item = self.ws.recv().await.unwrap();
+        let Ok(item) = serde_json::from_str::<UpbitItem>(&item) else {
+            tracing::error!("Upbit: failed to parse item: {}", item);
+            return;
+        };
+
+        let into_pair = |code: &str| -> (Currency, Currency) {
+            let mut iter = code.split('-');
+            let quote = Currency::from_str(iter.next().unwrap()).unwrap();
+            let base = Currency::from_str(iter.next().unwrap()).unwrap();
+            (base, quote)
+        };
+
+        let realtime_data = match item {
+            UpbitItem::Trade {
+                code,
+                trade_price,
+                trade_volume,
+                ask_bid,
+                timestamp,
+            } => RealtimeData::Trade(Trade {
+                pair: into_pair(&code),
+                timestamp,
+                price: trade_price,
+                qty: trade_volume,
+                is_bid: ask_bid == "BID",
+            }),
+            UpbitItem::Orderbook {
+                code,
+                orderbook_units,
+            } => RealtimeData::Orderbook(Orderbook {
+                pair: into_pair(&code),
+                bids: orderbook_units
+                    .iter()
+                    .map(|unit| Unit {
+                        price: unit.bid_price,
+                        amount: unit.bid_size,
+                    })
+                    .collect(),
+                asks: orderbook_units
+                    .iter()
+                    .map(|unit| Unit {
+                        price: unit.ask_price,
+                        amount: unit.ask_size,
+                    })
+                    .collect(),
+            }),
+        };
+
+        self.broadcaster.broadcast(realtime_data);
+    }
 }
 
 #[cfg(test)]

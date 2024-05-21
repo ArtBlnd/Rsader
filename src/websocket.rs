@@ -1,5 +1,7 @@
 use async_channel::{Receiver as AsyncRx, Sender as AsyncTx};
 
+use crate::utils::async_helpers;
+
 /// Clonable websocket client implementation with auto-reconnect feature.
 ///
 /// Note that the `Websocket` client only will recieve text messages.
@@ -26,6 +28,10 @@ impl Websocket {
 
     pub async fn send(&self, msg: &str) {
         self.sender.send(msg.to_string()).await.unwrap();
+    }
+
+    pub fn send_blocking(&self, msg: &str) {
+        async_helpers::block_on(self.sender.send(msg.to_string())).unwrap()
     }
 }
 

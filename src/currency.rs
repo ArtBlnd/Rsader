@@ -1,7 +1,17 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, rune::Any, strum::Display,
+    Serialize,
+    Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    rune::Any,
+    strum::Display,
+    strum::EnumString,
 )]
 pub enum Currency {
     #[rune(constructor)]

@@ -1,6 +1,6 @@
-mod orderbook;
 use std::{ops::Deref, sync::Arc};
 
+mod orderbook;
 pub use orderbook::*;
 mod dummy;
 pub use dummy::*;
