@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use manganis::*;
 
 #[component]
 pub fn StylePrelude() -> Element {
@@ -72,7 +73,10 @@ pub fn StyleButton(dark_mode: bool) -> Element {
 
 #[component]
 pub fn StyleFont() -> Element {
-    let text = format!(".font1 {{ font-family: 'Open Sans', sans-serif; }}");
+    let mut text = format!(".font1 {{ font-family: 'Open Sans', sans-serif; }}");
+    text += ".font2 { font-family: 'Roboto', sans-serif; }";
+    text += ".font3 { font-family: 'Arial', sans-serif; }";
+
     let text = (1..=100).fold(text, |acc, i| {
         format!("{}\n.font-size-{} {{ font-size: {}px; }}", acc, i, i)
     });
@@ -87,6 +91,14 @@ pub fn StyleFont() -> Element {
         link {
             rel: "stylesheet",
             href: "https://fonts.googleapis.com/css2?family=Open+Sans&display=swap"
+        }
+        link {
+            rel: "stylesheet",
+            href: "https://fonts.googleapis.com/css2?family=Roboto&display=swap"
+        }
+        link {
+            rel: "stylesheet",
+            href: "https://fonts.googleapis.com/css2?family=Arial&display=swap"
         }
 
         style { { text } }
