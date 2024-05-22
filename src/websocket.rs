@@ -67,7 +67,9 @@ mod websocket_wasm {
                 wasm_sockets::Message::Text(text) => {
                     let _ = rx_sender.try_send(text);
                 }
-                wasm_sockets::Message::Binary(_) => {}
+                wasm_sockets::Message::Binary(binary) => {
+                    let _ = rx_sender.try_send(String::from_utf8_lossy(&binary).to_string());
+                }
             },
         )));
 

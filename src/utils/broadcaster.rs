@@ -35,6 +35,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub struct Subscription<T> {
     receiver: Rx<T>,
 }

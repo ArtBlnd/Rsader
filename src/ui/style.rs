@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use manganis::*;
 
 #[component]
 pub fn StylePrelude() -> Element {
