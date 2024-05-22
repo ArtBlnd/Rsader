@@ -57,6 +57,10 @@ mod websocket_wasm {
         let tx_recver = tx_recver.clone();
         let rx_sender = rx_sender.clone();
 
+        let (connected_tx, connected_rx) = async_channel::bounded(1);
+        ws.set_on_connection(Some(Box::new(move |_| {
+            connected_tx.try_send(()).unwrap();
+        })));
         ws.set_on_message(Some(Box::new(
             move |client: &wasm_sockets::EventClient, message: wasm_sockets::Message| match message
             {
@@ -67,6 +71,7 @@ mod websocket_wasm {
             },
         )));
 
+        connected_rx.recv().await.unwrap();
         while let Ok(msg) = tx_recver.recv().await {
             ws.send_string(&msg).unwrap();
         }
