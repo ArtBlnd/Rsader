@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    currency::Currency,
-    exchange::{Exchange, RealtimeData},
-    utils::{broadcaster::Subscription, flag::Flag},
+    currency::Currency, dec, exchange::{Exchange, RealtimeData}, utils::{broadcaster::Subscription, flag::Flag}
 };
 
 use super::Widget;
@@ -55,15 +53,28 @@ impl Widget for OrderbookWidget {
         let data = data.read();
         let orderbook = data.as_ref()?;
 
+        let asks = orderbook.asks.iter().take(15).rev();
+        let bids = orderbook.bids.iter().take(15);
+
+        let max_ask = asks.clone().map(|x| x.amount).max();
+        let max_bid = bids.clone().map(|x| x.amount).max();
+        let max = max_ask.max(max_bid)?;
+
+
         rsx! {
             OrderbookBarStyle {}
             div { class: "color-1",
-                ul { style: "list-style: none;  display: flex; flex-direction: column; padding: 0; margin: 0;",
-                    for ask in orderbook.asks.iter().take(4).rev() {
-                        OrderbookBar { is_green: false, price: ask.price, amount: ask.amount }
+                ul { style: "list-style: none;  display: flex; flex-direction: column; padding: 0; margin: 0; align-content: center;",
+                    for ask in orderbook.asks.iter().take(15).rev() {
+                        OrderbookBar {
+                            is_green: false,
+                            price: ask.price,
+                            amount: ask.amount,
+                            ratio: ask.amount / max
+                        }
                     }
-                    for bid in orderbook.bids.iter().take(4) {
-                        OrderbookBar { is_green: true, price: bid.price, amount: bid.amount }
+                    for bid in orderbook.bids.iter().take(15) {
+                        OrderbookBar { is_green: true, price: bid.price, amount: bid.amount, ratio: bid.amount / max }
                     }
                 }
             }
@@ -87,7 +98,7 @@ fn OrderbookBarStyle() -> Element {
     }
     .orderbook-bar {
         position: absolute;
-        width: 100%;
+        right: 0;
         z-index: 1;
     }
     .color-obb-green {
@@ -119,7 +130,7 @@ fn OrderbookBarStyle() -> Element {
 }
 
 #[component]
-fn OrderbookBar(is_green: bool, price: Decimal, amount: Decimal) -> Element {
+fn OrderbookBar(is_green: bool, price: Decimal, amount: Decimal, ratio: Decimal) -> Element {
     let obb_font_color = if is_green {
         "color-obb-font-green"
     } else {
@@ -132,11 +143,16 @@ fn OrderbookBar(is_green: bool, price: Decimal, amount: Decimal) -> Element {
         "color-obb-red"
     };
 
+    let ratio = ratio * dec!(100);
+
     rsx! {
         li {
             class: "bar-height",
             style: "display:flex; align-items: center; justify-content: space-between",
-            div { class: "bar-height orderbook-bar {obb_color}" }
+            div {
+                class: "bar-height orderbook-bar {obb_color}",
+                width: "{ratio}%"
+            }
             span {
                 width: "100%",
                 class: "bar-height orderbook-bar-font font2 {obb_font_color}",
