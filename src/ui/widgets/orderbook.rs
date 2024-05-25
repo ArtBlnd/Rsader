@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
 use crate::{
-    currency::Currency, dec, exchange::{Exchange, RealtimeData}, utils::{broadcaster::Subscription, flag::Flag}
+    currency::Currency,
+    dec,
+    exchange::{Exchange, RealtimeData},
+    utils::{broadcaster::Subscription, flag::Flag},
 };
 
 use super::Widget;
 
 use crate::utils::Decimal;
 use dioxus::prelude::*;
-use unwrap_let::unwrap_let;
 
 pub struct OrderbookWidget {
     pair: (Currency, Currency),
@@ -60,22 +62,19 @@ impl Widget for OrderbookWidget {
         let max_bid = bids.clone().map(|x| x.amount).max();
         let max = max_ask.max(max_bid)?;
 
-
         rsx! {
             OrderbookBarStyle {}
-            div { class: "color-1",
-                ul { style: "list-style: none;  display: flex; flex-direction: column; padding: 0; margin: 0; align-content: center;",
-                    for ask in orderbook.asks.iter().take(15).rev() {
-                        OrderbookBar {
-                            is_green: false,
-                            price: ask.price,
-                            amount: ask.amount,
-                            ratio: ask.amount / max
-                        }
+            ul { style: "list-style: none;  display: flex; flex-direction: column; padding: 0; margin: 0; align-content: center;",
+                for ask in orderbook.asks.iter().take(15).rev() {
+                    OrderbookBar {
+                        is_green: false,
+                        price: ask.price,
+                        amount: ask.amount,
+                        ratio: ask.amount / max
                     }
-                    for bid in orderbook.bids.iter().take(15) {
-                        OrderbookBar { is_green: true, price: bid.price, amount: bid.amount, ratio: bid.amount / max }
-                    }
+                }
+                for bid in orderbook.bids.iter().take(15) {
+                    OrderbookBar { is_green: true, price: bid.price, amount: bid.amount, ratio: bid.amount / max }
                 }
             }
         }

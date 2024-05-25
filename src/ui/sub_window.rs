@@ -33,12 +33,14 @@ impl SubWindow {
         let mount_data = self.mount_data.clone();
         rsx! {
             div {
-                class: "color-2 pane",
+                class: "widget pane color-2",
                 onmousedown: move |_| SubWindowMgrState::send(SubWindowEvent::Focus(uuid)),
                 onmounted: move |data| { mount_data.set(data.data()) },
 
                 SubwindowBar { name, uuid }
-                WidgetElement { widget: self.widget.clone() }
+                div { class: "widget-item",
+                    WidgetElement { widget: self.widget.clone() }
+                }
             }
         }
     }
@@ -64,9 +66,7 @@ fn SubwindowBar(name: String, uuid: uuid::Uuid) -> Element {
         div {
             onmousedown: move |_| SubWindowMgrState::send(SubWindowEvent::DragStart(uuid)),
 
-            class: "color-3",
-            style: "display: flex; flex-direction: row; border-radius: 5px;",
-
+            class: "widget-bar color-3",
             div {
                 class: "font-color-main unselectable",
                 style: "padding: 4px; cursor: move; width: 100%;",
@@ -102,6 +102,24 @@ fn StylePrelude() -> Element {
 }
 .pane > * {
     overflow: hidden;
+}
+.widget-bar {
+    display: flex;
+    flex-direction: row;
+    border-radius: 5px;
+    flex-shrink: 0;
+    z-index: 2;
+}
+.widget-item {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    height: 100%;
+    z-index: 1;
+}
+.widget {
+    display: flex;
+    flex-direction: column;
 }
 .splitter-h {
     margin-left: -1px;
