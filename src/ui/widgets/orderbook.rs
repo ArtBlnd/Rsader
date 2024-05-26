@@ -38,12 +38,17 @@ impl OrderbookWidget {
 impl Widget for OrderbookWidget {
     fn render(&self) -> Element {
         let subscription = self.subscription.clone();
+        let pair = self.pair.clone();
+
         let mut data = use_resource(move || {
             let subscription = subscription.clone();
+            let pair = pair.clone();
             async move {
                 loop {
                     if let RealtimeData::Orderbook(value) = subscription.recv().await {
-                        return value;
+                        if value.pair == pair {
+                            return value;
+                        }
                     }
                 }
             }
@@ -52,11 +57,13 @@ impl Widget for OrderbookWidget {
         if data.finished() {
             data.restart();
         }
+
         let data = data.read();
         let orderbook = data.as_ref()?;
 
-        let asks = orderbook.asks.iter().take(15).rev();
-        let bids = orderbook.bids.iter().take(15);
+        let min_length = orderbook.asks.len().min(orderbook.bids.len());
+        let asks = orderbook.asks.iter().take(min_length).rev();
+        let bids = orderbook.bids.iter().take(min_length);
 
         let max_ask = asks.clone().map(|x| x.amount).max();
         let max_bid = bids.clone().map(|x| x.amount).max();
@@ -65,7 +72,7 @@ impl Widget for OrderbookWidget {
         rsx! {
             OrderbookBarStyle {}
             ul { style: "list-style: none;  display: flex; flex-direction: column; padding: 0; margin: 0; align-content: center;",
-                for ask in orderbook.asks.iter().take(15).rev() {
+                for ask in orderbook.asks.iter().take(min_length).rev() {
                     OrderbookBar {
                         is_green: false,
                         price: ask.price,
@@ -73,7 +80,7 @@ impl Widget for OrderbookWidget {
                         ratio: ask.amount / max
                     }
                 }
-                for bid in orderbook.bids.iter().take(15) {
+                for bid in orderbook.bids.iter().take(min_length) {
                     OrderbookBar { is_green: true, price: bid.price, amount: bid.amount, ratio: bid.amount / max }
                 }
             }
@@ -106,15 +113,9 @@ fn OrderbookBarStyle() -> Element {
     .color-obb-red {
         background-color: #361b22;
     }
-    .orderbook-bar-font {
-        position: relative;
+    .orderbook-bar-text {
+        line-height: 30px;
         z-index: 2;
-        justify-content: space-between;
-        vertical-align: middle;
-        flex 1 0; 
-        align-items: center; 
-        display: flex; 
-        overflow: hidden;
     }
     .color-obb-font-green {
         color: #228a44
@@ -147,20 +148,21 @@ fn OrderbookBar(is_green: bool, price: Decimal, amount: Decimal, ratio: Decimal)
     rsx! {
         li {
             class: "bar-height",
-            style: "display:flex; align-items: center; justify-content: space-between",
+            style: "display:flex; align-items: center; justify-content: space-between;",
             div {
                 class: "bar-height orderbook-bar {obb_color}",
+                style: "transition: width 0.5s;",
                 width: "{ratio}%"
             }
             span {
                 width: "100%",
-                class: "bar-height orderbook-bar-font font2 {obb_font_color}",
+                class: "bar-height orderbook-bar-text font2 {obb_font_color}",
                 style: "padding-left: 10px; text-align: left;",
                 "{price}"
             }
             span {
                 width: "100%",
-                class: "bar-height orderbook-bar-font font2 {obb_font_color}",
+                class: "bar-height orderbook-bar-text font2 {obb_font_color}",
                 style: "text-align: right; padding-right: 10px; ",
                 "{amount}"
             }

@@ -1,8 +1,8 @@
 use std::collections::HashSet;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use unwrap_let::unwrap_let;
 
@@ -18,7 +18,7 @@ use crate::{
     utils::http::{self, Client},
 };
 
-use super::{CandleSticks, Exchange, Market, OrderToken, Orderbook, RealtimeData, Ticker};
+use super::{CandleSticks, Exchange, Market, OrderToken, Orderbook, RealtimeData, Ticker, Trade};
 
 pub fn connect_key() -> Result<&'static str, BithumbError> {
     Config::get()
@@ -92,14 +92,17 @@ pub enum BithumbError {
 }
 
 pub struct Bithumb {
-    subscriptions: Arc<RwLock<HashSet<(Currency, Currency)>>>,
+    broadcaster: RealtimeDataBroadcaster,
     http_client: Client,
 }
 
 impl Bithumb {
     pub fn new() -> Self {
+        let broadcaster = RealtimeDataBroadcaster::new();
+        broadcaster.spawn_and_broadcast();
+
         Self {
-            subscriptions: Arc::new(RwLock::new(HashSet::new())),
+            broadcaster,
             http_client: http::client(),
         }
     }
@@ -115,7 +118,7 @@ impl Exchange for Bithumb {
         pair: (Currency, Currency),
         _market: Option<Market>,
     ) -> Subscription<RealtimeData> {
-        todo!()
+        self.broadcaster.subscribe(pair)
     }
 
     async fn orderbook(
@@ -728,11 +731,13 @@ pub enum BithumbItem {
     },
 }
 
+#[derive(Clone)]
 pub struct RealtimeDataBroadcaster {
     subscribed: Arc<Mutex<HashSet<(Currency, Currency)>>>,
     broadcaster: Broadcaster<RealtimeData>,
 
-    ws: Websocket,
+    ws1: Websocket,
+    ws2: Websocket,
 }
 
 impl RealtimeDataBroadcaster {
@@ -740,8 +745,123 @@ impl RealtimeDataBroadcaster {
         Self {
             subscribed: Arc::new(Mutex::new(HashSet::new())),
             broadcaster: Broadcaster::new(),
-            ws: Websocket::new("wss://pubwss.bithumb.com/pub/ws"),
+
+            ws1: Websocket::new("wss://pubwss.bithumb.com/pub/ws"),
+            ws2: Websocket::new("wss://pubwss.bithumb.com/pub/ws"),
         }
+    }
+
+    fn spawn_and_broadcast(&self) {
+        {
+            let broadcaster = self.clone();
+            async_helpers::spawn(async move {
+                loop {
+                    broadcaster.recv_orderbook_data_and_broadcast().await;
+                }
+            });
+        }
+        {
+            let broadcaster = self.clone();
+            async_helpers::spawn(async move {
+                loop {
+                    broadcaster.recv_transaction_data_and_broadcast().await;
+                }
+            });
+        }
+    }
+
+    fn subscribe(&self, pair: (Currency, Currency)) -> Subscription<RealtimeData> {
+        let mut subscribed = self.subscribed.lock().unwrap();
+        if subscribed.insert(pair) {
+            let pairs: Vec<_> = subscribed
+                .iter()
+                .map(|(base, quote)| format!("{:?}_{:?}", base, quote))
+                .collect();
+
+            self.ws1.send(
+                &serde_json::json!({
+                    "type": "orderbooksnapshot",
+                    "symbols": pairs,
+                })
+                .to_string(),
+            );
+
+            self.ws2.send(
+                &serde_json::json!({
+                    "type": "transaction",
+                    "symbols": pairs,
+                })
+                .to_string(),
+            );
+        }
+
+        self.broadcaster.subscribe()
+    }
+
+    async fn recv_orderbook_data_and_broadcast(&self) {
+        let data = self.ws1.recv().await.unwrap();
+        let Ok(data) = serde_json::from_str::<BithumbItem>(&data) else {
+            return;
+        };
+
+        let BithumbItem::OrderbookSnapshot { symbol, asks, bids } = data else {
+            unreachable!()
+        };
+
+        let pair = {
+            let mut iter = symbol.split('_');
+            (
+                Currency::from_str(iter.next().unwrap()).unwrap(),
+                Currency::from_str(iter.next().unwrap()).unwrap(),
+            )
+        };
+
+        let data = RealtimeData::Orderbook(Orderbook {
+            pair,
+            bids: bids
+                .into_iter()
+                .map(|(price, amount)| Unit { price, amount })
+                .collect(),
+            asks: asks
+                .into_iter()
+                .map(|(price, amount)| Unit { price, amount })
+                .collect(),
+        });
+        self.broadcaster.broadcast(data);
+    }
+
+    async fn recv_transaction_data_and_broadcast(&self) {
+        let data = self.ws2.recv().await.unwrap();
+        let Ok(data) = serde_json::from_str::<BithumbItem>(&data) else {
+            return;
+        };
+
+        let BithumbItem::Transaction {
+            symbol,
+            buy_sell_gb,
+            cont_amt,
+            cont_price,
+        } = data
+        else {
+            unreachable!()
+        };
+
+        let pair = {
+            let mut iter = symbol.split('_');
+            (
+                Currency::from_str(iter.next().unwrap()).unwrap(),
+                Currency::from_str(iter.next().unwrap()).unwrap(),
+            )
+        };
+
+        let data = RealtimeData::Trade(Trade {
+            pair,
+            timestamp: chrono::Utc::now().timestamp_millis(),
+            price: cont_price,
+            amount: cont_amt,
+            is_bid: buy_sell_gb == "B",
+        });
+        self.broadcaster.broadcast(data);
     }
 }
 

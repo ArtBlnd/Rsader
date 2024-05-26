@@ -601,7 +601,7 @@ pub enum UpbitItem {
         trade_price: Decimal,
         trade_volume: Decimal,
         ask_bid: String,
-        timestamp: u64,
+        timestamp: i64,
     },
     Orderbook {
         code: String,
@@ -626,7 +626,7 @@ struct RealtimeDataBroadcaster {
 }
 
 impl RealtimeDataBroadcaster {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             subscribed: Arc::new(Mutex::new(HashSet::new())),
             broadcaster: Broadcaster::new(),
@@ -634,7 +634,7 @@ impl RealtimeDataBroadcaster {
         }
     }
 
-    pub fn spawn_and_broadcast(&self) {
+    fn spawn_and_broadcast(&self) {
         let broadcaster = self.clone();
         async_helpers::spawn(async move {
             loop {
@@ -643,7 +643,7 @@ impl RealtimeDataBroadcaster {
         });
     }
 
-    pub fn subscribe(&self, pair: (Currency, Currency)) -> Subscription<RealtimeData> {
+    fn subscribe(&self, pair: (Currency, Currency)) -> Subscription<RealtimeData> {
         let mut subscribed = self.subscribed.lock().unwrap();
         if !subscribed.insert(pair) {
             return self.broadcaster.subscribe();
@@ -669,11 +669,11 @@ impl RealtimeDataBroadcaster {
             }
         ]);
 
-        self.ws.send_blocking(&message.to_string());
+        self.ws.send(&message.to_string());
         self.broadcaster.subscribe()
     }
 
-    pub async fn recv_and_broadcast(&self) {
+    async fn recv_and_broadcast(&self) {
         let item = self.ws.recv().await.unwrap();
         let Ok(item) = serde_json::from_str::<UpbitItem>(&item) else {
             tracing::error!("Upbit: failed to parse item: {}", item);
@@ -698,7 +698,7 @@ impl RealtimeDataBroadcaster {
                 pair: into_pair(&code),
                 timestamp,
                 price: trade_price,
-                qty: trade_volume,
+                amount: trade_volume,
                 is_bid: ask_bid == "BID",
             }),
             UpbitItem::Orderbook {

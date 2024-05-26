@@ -201,9 +201,9 @@ pub struct CandleSticks {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, rune::Any)]
 pub struct Trade {
     pub pair: (Currency, Currency),
-    pub timestamp: u64,
+    pub timestamp: i64,
     pub price: Decimal,
-    pub qty: Decimal,
+    pub amount: Decimal,
     pub is_bid: bool,
 }
 
@@ -223,4 +223,24 @@ pub enum OrderState {
 pub enum RealtimeData {
     Orderbook(#[rune(get)] Orderbook),
     Trade(#[rune(get)] Trade),
+}
+
+pub fn execute_if<E, O>(name: &str, ex: Arc<E>, f: impl FnOnce(Arc<E>) -> O) -> Option<O>
+where
+    E: Exchange,
+{
+    if name == E::NAME {
+        return Some(f(ex));
+    }
+
+    None
+}
+
+#[macro_export]
+macro_rules! select_ex {
+    ($ex:expr, $name:expr, $f:expr) => {
+        execute_if($name.as_str(), $ex.upbit.clone(), $f)
+            .or_else(|| execute_if($name.as_str(), $ex.binance.clone(), $f))
+            .or_else(|| execute_if($name.as_str(), $ex.bithumb.clone(), $f))
+    };
 }

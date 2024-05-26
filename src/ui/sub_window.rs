@@ -98,7 +98,6 @@ fn StylePrelude() -> Element {
     height: 100%;
     width: 100%;
     position: relative;
-    border-radius: 5px;
 }
 .pane > * {
     overflow: hidden;
@@ -106,7 +105,6 @@ fn StylePrelude() -> Element {
 .widget-bar {
     display: flex;
     flex-direction: row;
-    border-radius: 5px;
     flex-shrink: 0;
     z-index: 2;
 }
@@ -365,8 +363,8 @@ impl SubWindowMgrState {
         let _ = Self::pipe_instance().0.try_send(event);
     }
 
-    pub fn tx() -> TxEvent {
-        Self::pipe_instance().0.clone()
+    pub fn open(widget: BoxedWidget) {
+        Self::send(SubWindowEvent::WindowCreation(widget));
     }
 
     pub fn rx() -> RxEvent {

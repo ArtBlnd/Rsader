@@ -22,3 +22,18 @@ impl MountedDataStorge {
         *self.mounted_data.borrow_mut() = Some(mounted_data);
     }
 }
+
+#[macro_export]
+macro_rules! include_style {
+    ($($key:ident: $file:expr),*) => {
+        $(
+            #[component]
+            pub fn $key() -> Element {
+                let text = include_str!($file);
+                rsx! {
+                    style { { text } }
+                }
+            }
+        )*
+    };
+}

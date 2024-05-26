@@ -5,7 +5,7 @@ use crate::utils::async_helpers;
 /// Clonable websocket client implementation with auto-reconnect feature.
 ///
 /// Note that the `Websocket` client only will recieve text messages.
-/// If the binary messages are received, they will be silently ignored.
+/// If the binary messages are received, they will be converted to text messages.
 #[derive(Clone)]
 pub struct Websocket {
     sender: AsyncTx<String>,
@@ -26,11 +26,7 @@ impl Websocket {
         self.recver.recv().await.ok()
     }
 
-    pub async fn send(&self, msg: &str) {
-        self.sender.send(msg.to_string()).await.unwrap();
-    }
-
-    pub fn send_blocking(&self, msg: &str) {
+    pub fn send(&self, msg: &str) {
         async_helpers::block_on(self.sender.send(msg.to_string())).unwrap()
     }
 }
@@ -53,29 +49,42 @@ mod websocket_wasm {
     }
 
     async fn handler(url: String, tx_recver: AsyncRx<String>, rx_sender: AsyncTx<String>) {
-        let mut ws = WasmWebSocket::new(&url).unwrap();
-        let tx_recver = tx_recver.clone();
-        let rx_sender = rx_sender.clone();
+        let mut last_message: Option<String> = None;
+        loop {
+            let mut ws = WasmWebSocket::new(&url).unwrap();
+            let tx_recver = tx_recver.clone();
+            let rx_sender = rx_sender.clone();
 
-        let (connected_tx, connected_rx) = async_channel::bounded(1);
-        ws.set_on_connection(Some(Box::new(move |_| {
-            connected_tx.try_send(()).unwrap();
-        })));
-        ws.set_on_message(Some(Box::new(
-            move |client: &wasm_sockets::EventClient, message: wasm_sockets::Message| match message
-            {
-                wasm_sockets::Message::Text(text) => {
-                    let _ = rx_sender.try_send(text);
-                }
-                wasm_sockets::Message::Binary(binary) => {
-                    let _ = rx_sender.try_send(String::from_utf8_lossy(&binary).to_string());
-                }
-            },
-        )));
+            let (connected_tx, connected_rx) = async_channel::bounded(1);
+            ws.set_on_error(None);
+            ws.set_on_connection(Some(Box::new(move |_| {
+                connected_tx.try_send(()).unwrap();
+            })));
+            ws.set_on_message(Some(Box::new(
+                move |client: &wasm_sockets::EventClient, message: wasm_sockets::Message| {
+                    match message {
+                        wasm_sockets::Message::Text(text) => {
+                            let _ = rx_sender.try_send(text);
+                        }
+                        wasm_sockets::Message::Binary(binary) => {
+                            let _ =
+                                rx_sender.try_send(String::from_utf8_lossy(&binary).to_string());
+                        }
+                    }
+                },
+            )));
 
-        connected_rx.recv().await.unwrap();
-        while let Ok(msg) = tx_recver.recv().await {
-            ws.send_string(&msg).unwrap();
+            connected_rx.recv().await.unwrap();
+            if let Some(msg) = last_message.take() {
+                ws.send_string(&msg).unwrap();
+            }
+
+            while let Ok(msg) = tx_recver.recv().await {
+                if ws.send_string(&msg).is_err() {
+                    last_message = Some(msg);
+                    break;
+                }
+            }
         }
     }
 }
