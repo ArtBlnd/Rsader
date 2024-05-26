@@ -1,3 +1,4 @@
+
 use std::sync::Arc;
 
 use dioxus::prelude::*;
@@ -121,19 +122,24 @@ fn MainWindow(mut ctx: MainWindowContext) -> Element {
     }
 
     let mut commands = use_signal(String::new);
-    if !commands.read().is_empty() {
-        if let Some(command) = Command::parse(&commands.take()) {
-            match command {
-                Command::Orderbook(ex_name, (base, quote)) => {
-                    if let Some(widget) = select_ex!(ctx, ex_name, |exchange| {
-                        OrderbookWidget::new((base, quote), exchange)
-                    }) {
-                        SubWindowMgrState::open(widget.into());
+    let commands_str = commands.read().clone();
+    if !commands_str.is_empty() {
+        if commands_str.ends_with('\n') {
+            if let Some(command) = Command::parse(commands_str.trim()) {
+                match command {
+                    Command::Orderbook(ex_name, (base, quote)) => {
+                        if let Some(widget) = select_ex!(ctx, ex_name, |exchange| {
+                            OrderbookWidget::new((base, quote), exchange)
+                        }) {
+                            SubWindowMgrState::open(widget.into());
+                        }
                     }
                 }
+                
+                commands.take();
+                *is_command_palette_open.write() = false;
             }
-
-            *is_command_palette_open.write() = false;
+            
         }
     }
 
@@ -194,10 +200,17 @@ fn CommandPalette(commands: Signal<String>) -> Element {
                                 *commands.write() = input.value();
                             },
 
-                            onmounted: move |input| { async move {
-                                input.set_focus(true).await;
-                            }
+                            onkeydown: move |input| {
+                                if input.key() == Key::Enter {
+                                    *commands.write() += "\n";
+                                }
                             },
+
+                            onmounted: move |input| {
+                                async move {
+                                    input.set_focus(true).await;
+                                }
+                            }
                         }
                     }
                 }
