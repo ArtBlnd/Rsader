@@ -176,7 +176,11 @@ fn CommandPalette(commands: Signal<String>) -> Element {
 
     rsx! {
         CommandPaletteStyle {}
-        div { role: "dialog", aria_modal: "true", class: "palette",
+        div {
+            role: "dialog",
+            aria_modal: "true",
+            class: "palette",
+            style: "z-index: 999",
             div { class: "wrapper",
                 div { class: "contents",
                     div { class: "search",
@@ -188,7 +192,12 @@ fn CommandPalette(commands: Signal<String>) -> Element {
 
                             oninput: move |input| {
                                 *commands.write() = input.value();
+                            },
+
+                            onmounted: move |input| { async move {
+                                input.set_focus(true).await;
                             }
+                            },
                         }
                     }
                 }
